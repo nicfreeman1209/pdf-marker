@@ -50,6 +50,7 @@ lab/
 1_scripts/
 2_working/
 3_outputs/
+__pycache__/
 
 # =========================
 # Operating System Files
