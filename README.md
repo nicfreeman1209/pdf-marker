@@ -70,6 +70,7 @@ In between tally points, the number of times that part-marks are awarded should 
 
 When there is space on the screen (i.e. if you screen is not in portrait mode), 
 text will display the current status of the current candidates marks, against the above criteria.
+If the checks do not pass, a message will explain why not.
 
 ### Json format for mark schemes
 
