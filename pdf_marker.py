@@ -181,7 +181,7 @@ class Candidate:
 class PrettyWidget(QtWidgets.QWidget):
 	def __init__(self, parent=None):
 		QtWidgets.QWidget.__init__(self, parent=parent)
-		#self.showMaximized()		
+		self.showMaximized()		
 		self.setWindowTitle('Pdf Marker')
 		self.installEventFilter(self)
 		
