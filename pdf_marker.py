@@ -26,7 +26,7 @@ logging.getLogger('').addHandler(console)
 
 scripts_dir = os.path.join(".","1_scripts")
 workings_dir = os.path.join(".","2_working")
-outputs_dir = os.path.join(".","3_output")
+outputs_dir = os.path.join(".","3_outputs")
 
 class Mark:
 	def __init__(self, type, x, y, w, h, score=None, posList=None):
@@ -121,17 +121,17 @@ class Candidate:
 		label_text = ""
 		lines = 0
 		for i in range(len(qs)):
-			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, np.sum(part_qs[i], dtype=int), str(part_qs[i])) + "\n"
+			label_text += "Q{:<2}:  {:<2}  {:<20}".format(i+1, np.sum(part_qs[i]), str(part_qs[i])) + "\n"
 			lines += 1
 		if len(part_qs[-1]) > 0:
 			i = len(qs)
-			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, "- ", str(part_qs[i])) + "\n" # part marks after last tally point
+			label_text += "Q{:<2}:  {:<2}  {:<20}".format(i+1, "- ", str(part_qs[i])) + "\n" # part marks after last tally point
 			lines += 1
 		for i in range(len(ms.qs_max)-lines):
 			label_text += "\n"
 			
 		# formal consistency check, in order helpful to user
-		status = "Incomplete:\n	 "
+		status = "Incomplete:\n  "
 		# notify if too many qs
 		if len(qs) > len(ms.qs_max):
 			status += "Too many questions (%d vs %d)" % (len(qs), len(ms.qs_max))
@@ -384,7 +384,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			return
 		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
 		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
-		label_text += "Page: %d/%d \n\n" % (self.curPage+1, len(self.curCandidate.marks))	
+		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
 		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
 		label_text += part_score_str + "\n\n"
 		label_text += status + "\n\n"
