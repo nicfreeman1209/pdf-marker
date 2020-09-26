@@ -2,7 +2,6 @@
 # author: Nic Freeman
 
 from PyQt5 import QtGui, QtCore, QtWidgets
-from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 933120000
@@ -10,14 +9,15 @@ import pdf2image, img2pdf
 import numpy as np
 import itertools
 import os, sys, shutil
+import datetime
 import pickle, json, glob
 import logging
 import traceback
 
 logging.basicConfig(filename='pdf_marker.log', 
-                    format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                    datefmt='%m-%d %H:%M:%S',
-                    filemode='a',
+					format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+					datefmt='%m-%d %H:%M:%S',
+					filemode='a',
 					level=logging.INFO)
 console = logging.StreamHandler()
 console.setLevel(logging.DEBUG)
@@ -29,12 +29,13 @@ workings_dir = os.path.join(".","2_working")
 outputs_dir = os.path.join(".","3_output")
 
 class Mark:
-	def __init__(self, type, x, y, w, h, score=None):
+	def __init__(self, type, x, y, w, h, score=None, posList=None):
 		self.type = type
 		self.x = int(x)
 		self.y = int(y)
 		self.h = int(h) 
 		self.w = int(w)
+		self.posList = posList # list of QPointF
 		self.score = score
 		
 	def __repr__(self):
@@ -119,13 +120,13 @@ class Candidate:
 		score = np.sum(qs, dtype=int)	
 		label_text = ""
 		for i in range(len(qs)):
-			label_text += "Q{:<2}:  {:<2}  {:<20}".format(i+1, np.sum(part_qs[i], dtype=int), str(part_qs[i])) + "\n"
+			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, np.sum(part_qs[i], dtype=int), str(part_qs[i])) + "\n"
 		if len(part_qs[-1]) > 0:
 			i = len(qs)
-			label_text += "Q{:<2}:  {:<2}  {:<20}".format(i+1, "- ", str(part_qs[i])) + "\n" # part marks after last tally point
+			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, "- ", str(part_qs[i])) + "\n" # part marks after last tally point
 		
 		# formal consistency check, in order helpful to user
-		status = "Incomplete:\n  "
+		status = "Incomplete:\n	 "
 		# notify if too many qs
 		if len(qs) > len(ms.qs_max):
 			status += "Too many questions (%d vs %d)" % (len(qs), len(ms.qs_max))
@@ -171,19 +172,23 @@ class Candidate:
 	def GetPagePath(self, i):
 		return os.path.join(self.dir, "%03d"%(i)+".jpg")
 	
+	def GetTouchPagePath(self, i):
+		return os.path.join(self.dir, "%03d"%(i)+"_touch.jpg")
 		
 class PrettyWidget(QtWidgets.QWidget):
 	def __init__(self, parent=None):
 		QtWidgets.QWidget.__init__(self, parent=parent)
-		self.showMaximized()		
+		#self.showMaximized()		
 		self.setWindowTitle('Pdf Marker')
+		self.installEventFilter(self)
 		
 		self.candidateDirs = []
 		self.curCandidate = None # current candidate
 		self.curPage = None # integer, current page of candidate
 		
-		self.curPixMapBG = None # current page without annotations
-		self.curPixMapRatio = 1 # resize ratio of pixmap 
+		self.curPixmapBG = None # current page without annotations
+		self.curPixMapRatio = 1 # resize ratio of background pixmap 
+		self.curPixMapTouch = None # touch overlay
 		self.marginX = 300 
 				
 		logging.info("Initializing")
@@ -192,6 +197,74 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.LoadCandidates()
 		self.show()
 		
+		self.lastTabletEventTime = datetime.datetime.now() 
+		self.tabletControl = False
+		self.tabletEventList = None
+		self.tabletPainter = None
+	
+	def eventFilter(self, obj, event):
+		if event.type() == QtCore.QEvent.MouseButtonPress:	
+			if self.tabletControl or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.15): 
+				return True # some QEvent.TabletPress get duplicated as QEvent.MouseButtonPress >_>
+			self.MousePressEvent(event)
+		elif event.type() == QtCore.QEvent.KeyPress:	
+			self.KeyPressEvent(event)
+		elif event.type() == QtCore.QEvent.TabletPress:	
+			self.lastTabletEventTime = datetime.datetime.now()
+			self.tabletControl = True
+			self.TabletPressEvent(event)
+		elif event.type() == QtCore.QEvent.TabletMove:	 
+			self.lastTabletEventTime = datetime.datetime.now()
+			self.TabletMoveEvent(event)
+		elif event.type() == QtCore.QEvent.TabletRelease:	
+			self.lastTabletEventTime = datetime.datetime.now()
+			self.tabletControl = False
+			self.TabletReleaseEvent(event)
+		else:
+			return super(PrettyWidget, self).eventFilter(obj, event)
+		return True
+		
+	def TabletPressEvent(self, event):
+		# touch marks are drawn here in screen space, then converted to underlying image size in TabletReleaseEvent
+		self.tabletPainter = QtGui.QPainter(self.imgLB.pixmap())
+		self.tabletPainter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+		self.tabletPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+		pen_size = max(1, int(min(self.imgLB.height(), self.imgLB.width())/300)) # magic
+		self.tabletPainter.setPen(QtGui.QPen(Qt.red, 5*self.curPixMapRatio, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+
+		x = event.x() - self.imgLB.x()
+		y = event.y() - self.imgLB.y()
+		if x >= self.imgLB.width() or y >= self.imgLB.height():
+			return True
+		self.tabletEventPosList = [QtCore.QPointF(x,y)] # list for possible future use e.g bezier
+	
+	def TabletMoveEvent(self, event):
+		if not self.tabletPainter or not self.tabletEventPosList:
+			return True
+		x = event.x() - self.imgLB.x()
+		y = event.y() - self.imgLB.y()
+		if x >= self.imgLB.width() or y >= self.imgLB.height():
+			return True
+		last_x = self.tabletEventPosList[-1].x()
+		last_y = self.tabletEventPosList[-1].y()
+		self.tabletPainter.drawLine(x, y, last_x, last_y)
+		self.update()
+		self.tabletEventPosList.append(QtCore.QPointF(x,y))
+	
+	def TabletReleaseEvent(self, event):
+		if not self.tabletPainter:
+			return True
+		self.tabletPainter.end()
+		self.tabletPainter = None
+		mark = Mark("touch", -1, -1, -1, -1, None, self.ScaleEventList(self.tabletEventPosList))
+		self.curCandidate.marks[self.curPage].append(mark)
+		logging.debug("Added touch mark, first pos (%f,%f)" % (self.tabletEventPosList[0].x(), self.tabletEventPosList[0].y()))
+		self.tabletEventPosList = None
+		self.UpdatePixmap()
+		
+	def ScaleEventList(self, l):
+		return [QtCore.QPointF(p.x()/self.curPixMapRatio,p.y()/self.curPixMapRatio) for p in l]
+	
 	def InitUI(self):
 		self.loadScriptsButton = QtWidgets.QPushButton("Load scripts", self)
 		self.loadScriptsButton.setToolTip("load in the scripts, ignoring any that already have working directories")
@@ -233,6 +306,9 @@ class PrettyWidget(QtWidgets.QWidget):
 	@QtCore.pyqtSlot()
 	def LoadScripts(self):
 		logging.info("Loading scripts")
+		x_dim, y_dim = (2480,3508)
+		blank_pixmap = QtGui.QPixmap(x_dim, y_dim)
+		blank_pixmap.fill(QtCore.Qt.transparent)
 		if not os.path.exists(scripts_dir):
 			logging.error("Scripts not found")
 			return
@@ -246,24 +322,26 @@ class PrettyWidget(QtWidgets.QWidget):
 			filename_pdf = files[i]
 			logging.info("Processing '%s' (%d/%d)" % (filename_pdf, i+1, len(files)))
 			try:
-				candidate = os.path.split(filename_pdf)[1][:-4]
-				candidate_dir = os.path.join(workings_dir, candidate)
+				candidate_name = os.path.split(filename_pdf)[1][:-4]
+				candidate_dir = os.path.join(workings_dir, candidate_name)
+				pages = pdf2image.convert_from_path(filename_pdf, 500)
 				if os.path.exists(candidate_dir):
 					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
 					continue
 				else:
 					os.mkdir(candidate_dir)
-				pages = pdf2image.convert_from_path(filename_pdf, 500)
-				for j in range(len(pages)):
-					pages[j].thumbnail((2480,3508), Image.ANTIALIAS)
-					pages[j].save(os.path.join(candidate_dir, "%03d"%(j)+".jpg"))
 				marks = []
 				for j in range(len(pages)):
 					marks.append([])
 				with open(os.path.join(candidate_dir, "marks.pickle"), 'wb') as f:
-					pickle.dump(marks, f)					
+					pickle.dump(marks, f)
+				candidate = Candidate(candidate_dir)
+				for j in range(len(pages)):
+					pages[j].thumbnail((x_dim,y_dim), Image.ANTIALIAS)
+					pages[j].save(candidate.GetPagePath(j))
+					blank_pixmap.save(candidate.GetTouchPagePath(j))
 			except Exception as e:
-				logging.error("Failed to load script for candidate '%s': %s" % (candidate, str(e)))
+				logging.error("Failed to load script from  '%s': %s" % (filename_pdf, str(e)))
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
 			QtWidgets.QApplication.processEvents()
 		logging.info("Done loading")
@@ -278,6 +356,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.SetCandidatePage(self.candidateDirs[0], 0)
 	
 	def SetCandidatePage(self, dir, n):
+		# ALL page changes go through here
 		logging.debug("Set candidate page: %s %d" % (dir, n))
 		if not self.curCandidate or dir != self.curCandidate.dir:
 			self.curCandidate = Candidate(dir)
@@ -286,29 +365,36 @@ class PrettyWidget(QtWidgets.QWidget):
 			return
 		self.curPage = n
 		
-		bg_file = self.curCandidate.GetPagePath(self.curPage)
-		self.curPixMapBG = QtGui.QPixmap(bg_file)
-		self.UpdatePixMap()
+		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curPage))
+		self.curPixMapTouch = QtGui.QPixmap(self.curCandidate.GetTouchPagePath(self.curPage))
+		self.UpdatePixmap()
 	
-	def UpdatePixMap(self):
-		if not self.curPixMapBG:
-			return
+	def UpdatePixmap(self):
+		if not self.curPixmapBG:
+			return		
+		logging.debug("Pixmap update")
 		x_window = self.geometry().width()
 		y_window = self.geometry().height()*0.99 # show user that whole image is visible
-		x_ratio = float(x_window*0.5) / float(self.curPixMapBG.width())
-		y_ratio = float(y_window) / float(self.curPixMapBG.height())
+		x_ratio = float(x_window*0.5) / float(self.curPixmapBG.width())
+		y_ratio = float(y_window) / float(self.curPixmapBG.height())
 		ratio = min(x_ratio, y_ratio)
 		self.curPixMapRatio = ratio
-		x_img = self.curPixMapBG.width() * ratio
-		y_img = self.curPixMapBG.height() * ratio	
+		x_img = self.curPixmapBG.width() * ratio
+		y_img = self.curPixmapBG.height() * ratio	
 		self.imgLB.resize(int(x_img), int(y_img))
 		self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) / 2))
 		self.textLB.resize(int(x_window*0.25), int(y_window*0.6))
-		self.textLB.move(int(x_window*0.1), int(y_window*0.25))		
+		self.textLB.move(int(x_window*0.1), int(y_window*0.25))	
 		
-		pixmap_marks = self.CreateMarksPixMap(self.curPixMapBG, self.curCandidate.marks[self.curPage])
-		pixmap = self.OverlayPixMap(self.curPixMapBG, pixmap_marks)
-		self.imgLB.setPixmap(pixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
+		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
+		blankPixmap.fill(QtCore.Qt.transparent)
+		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
+		canvasPainter = QtGui.QPainter(blankPixmap)
+		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
+		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
+		canvasPainter.end()
+		
+		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
 		self.imgLB.show()	
 
 		if not self.markScheme:
@@ -331,13 +417,13 @@ class PrettyWidget(QtWidgets.QWidget):
 		painter = QtGui.QPainter(pixmap)
 		painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
 		painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-		# mark types: strike, score, tally, justify, circle, leftarrow, rightarrow
 		painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
+		# mark types: strike, score, tally, justify, circle, leftarrow, rightarrow
 		for mark in marks:
 			if mark.type=="strike" and not suppressStrikes:
 				painter.setOpacity(0.5)
-				w = self.curPixMapBG.width() 
-				h = self.curPixMapBG.height()
+				w = self.curPixmapBG.width() 
+				h = self.curPixmapBG.height()
 				painter.drawLine(int(w/2/0.9), int(h*0.02), int(w/2*0.9), int(h*0.98))								
 				painter.setOpacity(1)
 			elif mark.type=="circle":
@@ -360,6 +446,15 @@ class PrettyWidget(QtWidgets.QWidget):
 				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
 				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), mark.y)
 				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), mark.y)
+			elif mark.type=="touch":
+				painter.setPen(QtGui.QPen(Qt.red,  5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+				for i in range(len(mark.posList)-1):
+					x1 = mark.posList[i].x()
+					y1 = mark.posList[i].y()
+					x2 = mark.posList[i+1].x()
+					y2 = mark.posList[i+1].y()
+					painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+				painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
 		# margin		
 		if self.markScheme:
 			painter.setPen(QtGui.QPen(Qt.red,  4, Qt.DashLine))
@@ -379,8 +474,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		painter.drawPixmap(result.rect(), p2, p2.rect())
 		painter.end()
 		return result
-		
-	def mousePressEvent(self, event):
+	
+	def MousePressEvent(self, event):
 		global_x = event.pos().x()
 		global_y = event.pos().y()
 		x = global_x - self.imgLB.x()
@@ -451,14 +546,23 @@ class PrettyWidget(QtWidgets.QWidget):
 				
 		self.curCandidate.TallyMarks()
 		self.curCandidate.SaveMarks()
-		self.UpdatePixMap()		
+		self.UpdatePixmap()		
 		
 	def IsMarkAtLoc(self, mark, x, y):
 		if mark.type=="strike":
 			return False
-		square_hit = (mark.type!="circle" and abs(mark.x-x)<mark.h/2 and abs(mark.y-y)<mark.w/2) 
-		circle_hit = (mark.type=="circle" and (mark.x-x)**2+(mark.y-y)**2<=(mark.h/2)**2)
-		return square_hit or circle_hit
+		hit = False
+		if mark.type=="circle":
+			hit = ((mark.x-x)**2 + (mark.y-y)**2 <= (mark.h/2)**2)
+		elif mark.type=="touch":
+			for p in mark.posList:
+				r = 30 # magic
+				if (x-p.x())**2 + (y-p.y())**2 <= r**2:
+					hit = True
+					break
+		else:
+			hit = (abs(mark.x-x)<mark.h/2 and abs(mark.y-y)<mark.w/2)
+		return hit
 		
 	def ExtractMarkAtLoc(self, x,y, marks):
 		# get the (first) mark covering (x,y)
@@ -470,7 +574,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				del marks[i]
 				return _mark	
 				
-	def keyPressEvent(self, event):
+	def KeyPressEvent(self, event):
 		super(PrettyWidget, self).keyPressEvent(event)
 		key = event.key()		
 		shift = (event.modifiers() == QtCore.Qt.ShiftModifier)
@@ -487,7 +591,16 @@ class PrettyWidget(QtWidgets.QWidget):
 		elif key == QtCore.Qt.Key_S:
 			self.ToggleStrike()
 			self.curCandidate.SaveMarks()
-			self.UpdatePixMap()
+			self.UpdatePixmap()
+		elif key == QtCore.Qt.Key_C:
+			self.ClearCurrentPage()
+	
+	def ClearCurrentPage(self):
+		if not self.curCandidate:
+			return
+		self.curCandidate.marks[self.curPage] = []
+		self.UpdatePixmap()
+		logging.debug("Removed all marks on current page")
 	
 	def ToggleStrike(self):
 		marks = self.curCandidate.marks[self.curPage]
@@ -530,7 +643,8 @@ class PrettyWidget(QtWidgets.QWidget):
 				self.SetCandidatePage(dir, 0)
 				return False
 		return True
-		
+				
+	
 	@QtCore.pyqtSlot()
 	def OutputScripts(self):
 		# check
@@ -539,7 +653,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				return
 				
 		# write the pdfs
-		if  os.path.exists(outputs_dir):
+		if	os.path.exists(outputs_dir):
 			shutil.rmtree(outputs_dir)
 		os.mkdir(outputs_dir)
 		self.progressLB.show()
@@ -549,14 +663,14 @@ class PrettyWidget(QtWidgets.QWidget):
 			dir = self.candidateDirs[i]
 			candidate = Candidate(dir)
 			out_working_dir = os.path.join(dir,"output") 
-			if  os.path.exists(out_working_dir):
+			if	os.path.exists(out_working_dir):
 				shutil.rmtree(out_working_dir)
 			os.mkdir(out_working_dir)
 			for j in range(len(candidate.marks)):
 				bg_file = candidate.GetPagePath(j)
 				pixmap_bg = QtGui.QPixmap(bg_file)
 				pixmap_marks = self.CreateMarksPixMap(pixmap_bg, candidate.marks[j])
-				pixmap = self.OverlayPixMap(self.curPixMapBG, pixmap_marks)
+				pixmap = self.OverlayPixMap(self.curPixmapBG, pixmap_marks)
 				out_path = os.path.join(out_working_dir, "%03d"%(j)+".jpg")
 				pixmap.save(out_path, "jpg")
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
@@ -580,10 +694,10 @@ class PrettyWidget(QtWidgets.QWidget):
 			for label in self.markScheme.part_qs_str[i]:
 				part_questions_str += str(i+1) + label + ","
 		
-		csv_tots    = "Candidate,Total,\n"
-		csv_qs 	    = "Candidate, " + questions_str + "Total,\n"
+		csv_tots	= "Candidate,Total,\n"
+		csv_qs		= "Candidate, " + questions_str + "Total,\n"
 		csv_part_qs = "Candidate," + part_questions_str + "Total,\n"
-		csv_exam    = "Candidate," + questions_str + "Total,All Marked,Total Checked,\n"
+		csv_exam	= "Candidate," + questions_str + "Total,All Marked,Total Checked,\n"
 		
 		for i in range(len(self.candidateDirs)):
 			dir = self.candidateDirs[i]
@@ -611,16 +725,18 @@ class PrettyWidget(QtWidgets.QWidget):
 
 	def resizeEvent(self, event):
 		if hasattr(self,"curCandidate"): # can occur before __init__
-			self.UpdatePixMap()
+			self.UpdatePixmap()
 
 	def closeEvent(self, event):
-		if hasattr(self,"curCandidate"):
+		if self.curCandidate:
 			self.curCandidate.SaveMarks()
 		logging.info("Shutdown")
 
 		
 def main():
 	app = QtWidgets.QApplication(sys.argv)
+	app.setAttribute(Qt.AA_SynthesizeMouseForUnhandledTouchEvents, False)
+	app.setAttribute(Qt.AA_SynthesizeMouseForUnhandledTabletEvents, False)
 	ex = PrettyWidget()
 	app.exec_()
 
