@@ -45,6 +45,7 @@ lab/
 
 # Data files
 *.csv
+*.pickle
 
 # working dirs
 1_scripts/
