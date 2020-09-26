@@ -191,16 +191,18 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.curPixMapTouch = None # touch overlay
 		self.marginX = 300 
 				
+		self.lastTabletEventTime = datetime.datetime.now() 
+		self.tabletControl = False
+		self.tabletEventList = None
+		self.tabletPainter = None
+		self.tabletPenSize = 5
+		
 		logging.info("Initializing")
 		self.LoadMarkScheme()		
 		self.InitUI()
 		self.LoadCandidates()
 		self.show()
 		
-		self.lastTabletEventTime = datetime.datetime.now() 
-		self.tabletControl = False
-		self.tabletEventList = None
-		self.tabletPainter = None
 	
 	def eventFilter(self, obj, event):
 		if event.type() == QtCore.QEvent.MouseButtonPress:	
@@ -230,7 +232,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.tabletPainter.setRenderHint(QtGui.QPainter.Antialiasing, True)
 		self.tabletPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
 		pen_size = max(1, int(min(self.imgLB.height(), self.imgLB.width())/300)) # magic
-		self.tabletPainter.setPen(QtGui.QPen(Qt.red, 5*self.curPixMapRatio, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+		self.tabletPainter.setPen(QtGui.QPen(Qt.red, self.tabletPenSize*self.curPixMapRatio, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
 
 		x = event.x() - self.imgLB.x()
 		y = event.y() - self.imgLB.y()
@@ -390,6 +392,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		blankPixmap.fill(QtCore.Qt.transparent)
 		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
 		canvasPainter = QtGui.QPainter(blankPixmap)
+		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
+		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
 		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
 		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
 		canvasPainter.end()
@@ -447,7 +451,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), mark.y)
 				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), mark.y)
 			elif mark.type=="touch":
-				painter.setPen(QtGui.QPen(Qt.red,  5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+				painter.setPen(QtGui.QPen(Qt.red,  self.tabletPenSize, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
 				for i in range(len(mark.posList)-1):
 					x1 = mark.posList[i].x()
 					y1 = mark.posList[i].y()
@@ -462,19 +466,6 @@ class PrettyWidget(QtWidgets.QWidget):
 		painter.end()
 		return pixmap
 
-	def OverlayPixMap(self, p1, p2, mode=QtGui.QPainter.CompositionMode_SourceOver):
-		# overlay p2 onto p1
-		s = p1.size().expandedTo(p2.size())
-		result =  QtGui.QPixmap(s)
-		result.fill(QtCore.Qt.transparent)
-		painter = QtGui.QPainter(result)
-		painter.setRenderHint(QtGui.QPainter.Antialiasing)
-		painter.drawPixmap(QtCore.QPoint(), p1)
-		painter.setCompositionMode(mode)
-		painter.drawPixmap(result.rect(), p2, p2.rect())
-		painter.end()
-		return result
-	
 	def MousePressEvent(self, event):
 		global_x = event.pos().x()
 		global_y = event.pos().y()
@@ -668,11 +659,15 @@ class PrettyWidget(QtWidgets.QWidget):
 			os.mkdir(out_working_dir)
 			for j in range(len(candidate.marks)):
 				bg_file = candidate.GetPagePath(j)
-				pixmap_bg = QtGui.QPixmap(bg_file)
-				pixmap_marks = self.CreateMarksPixMap(pixmap_bg, candidate.marks[j])
-				pixmap = self.OverlayPixMap(self.curPixmapBG, pixmap_marks)
+				bgPixmap = QtGui.QPixmap(bg_file)
+				marksPixmap = self.CreateMarksPixMap(bgPixmap, candidate.marks[j])
+				canvasPainter = QtGui.QPainter(bgPixmap)
+				canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
+				canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+				canvasPainter.drawPixmap(bgPixmap.rect(), marksPixmap)
+				canvasPainter.end()
 				out_path = os.path.join(out_working_dir, "%03d"%(j)+".jpg")
-				pixmap.save(out_path, "jpg")
+				bgPixmap.save(out_path, "jpg")
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
 			QtWidgets.QApplication.processEvents()
 		
