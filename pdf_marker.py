@@ -199,10 +199,13 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.tabletPainter = None
 		self.tabletPenSize = 5
 		
+		self.configFile = os.path.join(".","config.pickle")
+		
 		logging.info("Initializing")
 		self.LoadMarkScheme()		
 		self.InitUI()
 		self.LoadCandidates()
+		
 		self.show()
 		
 	def InitUI(self):
@@ -218,17 +221,22 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.outputScriptsButton.clicked.connect(self.OutputScripts)
 		self.outputScriptsButton.show()
 		
+		self.forwardPageButton = QtWidgets.QPushButton(" > ", self)
+		self.forwardPageButton.setToolTip("go back one page")
+		self.forwardPageButton.clicked.connect(self.ForwardPage)
+		self.backwardPageButton = QtWidgets.QPushButton(" < ", self)
+		self.backwardPageButton.setToolTip("go forwards one page")
+		self.backwardPageButton.clicked.connect(self.BackwardPage)
+
 		self.progressLB = QtWidgets.QLabel(self)
 		self.progressLB.setAlignment(Qt.AlignLeft)
 		self.progressLB.setStyleSheet("font: 12pt Consolas")
 		self.progressLB.move(10+self.loadScriptsButton.width(),5)
 		self.progressLB.resize(200, self.loadScriptsButton.height())
 		
-		self.imgLB = QtWidgets.QLabel(self)
-		
+		self.imgLB = QtWidgets.QLabel(self)		
 		self.textLB = QtWidgets.QLabel(self)
 		self.textLB.setAlignment(Qt.AlignLeft)
-		#self.textLB.setStyleSheet("font: 15pt Consolas")
 		
 	def LoadMarkScheme(self):			
 		self.markScheme = None
@@ -290,20 +298,33 @@ class PrettyWidget(QtWidgets.QWidget):
 		if len(self.candidateDirs)==0:
 			logging.info("No candidates found, you probably need to load the scripts in")
 			return
+		
+		if os.path.exists(self.configFile):
+			with open(self.configFile, "rb") as f:
+				config = pickle.load(f)			
+			self.SetCandidatePage(config["candidate"], config["page"])
+			return
 		self.SetCandidatePage(self.candidateDirs[0], 0)
 	
 	def SetCandidatePage(self, dir, n):
 		# ALL page changes go through here
 		logging.debug("Set candidate page: %s %d" % (dir, n))
+		if dir not in self.candidateDirs:
+			logging.error("Candidate not found: %s" % (dir))
+			return
 		if not self.curCandidate or dir != self.curCandidate.dir:
 			self.curCandidate = Candidate(dir)
-		if n<0 or n>=len(self.curCandidate.marks):
+		if n<-1 or n>=len(self.curCandidate.marks):
 			logging.error("Attempt to set invalid candidate page: %s, %d" % (self.curCandidate.name, n))
 			return
-		self.curPage = n
+		self.curPage = n if n>=0 else len(self.curCandidate.marks)-1
 		
 		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curPage))
 		self.UpdatePixmap()
+
+		config = {"candidate":self.curCandidate.dir, "page":self.curPage}
+		with open(self.configFile, "wb") as f:
+			pickle.dump(config, f)			
 	
 	def UpdatePixmap(self):
 		if not self.curPixmapBG:
@@ -328,7 +349,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			self.textLB.show() 
 		else: #portrait
 			x_ratio = float(x_window*0.9) / float(self.curPixmapBG.width())
-			y_ratio = float(y_window*0.9) / float(self.curPixmapBG.height())
+			y_ratio = float(y_window*0.88) / float(self.curPixmapBG.height())
 			ratio = min(x_ratio, y_ratio)
 			self.curPixMapRatio = ratio
 			x_img = self.curPixmapBG.width() * ratio
@@ -349,16 +370,24 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
 		self.imgLB.show()	
+		
+		w = self.forwardPageButton.width()
+		h = self.loadScriptsButton.height() 
+		self.backwardPageButton.move(x_window-w*2-5, 5)
+		self.backwardPageButton.resize(w, h*2)
+		self.backwardPageButton.show()
+		self.forwardPageButton.move(x_window-w-10, 5)
+		self.forwardPageButton.resize(w, h*2)
+		self.forwardPageButton.show()
 
 		if not self.markScheme:
 			return
 		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
-		#label_text =  "Global page: %d/%d \n" % (0,0)
-		label_text += "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir), len(self.candidateDirs))
-		label_text += "Page: %d/%d \n\n" % (self.curPage, len(self.curCandidate.marks))	
+		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
+		label_text += "Page: %d/%d \n\n" % (self.curPage+1, len(self.curCandidate.marks))	
 		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
 		label_text += part_score_str + "\n\n"
-		label_text += status + "\n"
+		label_text += status + "\n\n"
 		label_text += "Max: %d\n" % self.markScheme.nFullMarks
 		label_text += self.markScheme.fullMarksStr
 		self.textLB.setText(label_text)
@@ -414,6 +443,14 @@ class PrettyWidget(QtWidgets.QWidget):
 		painter.end()
 		return pixmap
 
+	@QtCore.pyqtSlot()
+	def ForwardPage(self):
+		self.IncrementPage(1, False)
+
+	@QtCore.pyqtSlot()
+	def BackwardPage(self):
+		self.IncrementPage(-1, False)
+	
 	def eventFilter(self, obj, event):
 		if event.type() == QtCore.QEvent.MouseButtonPress:	
 			if self.tabletControl or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.15): 
@@ -618,20 +655,21 @@ class PrettyWidget(QtWidgets.QWidget):
 			marks.append(Mark("strike",0,0,0,0))
 		logging.debug("Strike toggled, state=%r" % (self.curFileIdx, strike_idx==None))
 
-	def IncrementPage(self, step, per_candidate):
+	def IncrementPage(self, step, per_candidate, candidate_first_page=True):
 		if per_candidate:
 			target_idx = self.candidateDirs.index(self.curCandidate.dir) + step
 			target_idx = np.clip(target_idx, 0, len(self.candidateDirs)-1)
 			dir = self.candidateDirs[target_idx]
 			if dir != self.curCandidate.dir: # don't reset candidatePage to 0 at top-most end
-				self.SetCandidatePage(dir, 0)
+				candidatePage = 0 if candidate_first_page else -1
+				self.SetCandidatePage(dir, candidatePage)
 			return
 		target_page = self.curPage + step
 		if target_page<0:
-			self.IncrementPage(-1, True)
+			self.IncrementPage(-1, True, False)
 			return
 		elif target_page>=len(self.curCandidate.marks):
-			self.IncrementPage(1, True)
+			self.IncrementPage(1, True, True)
 			return
 		self.SetCandidatePage(self.curCandidate.dir, target_page)
 		
