@@ -20,7 +20,7 @@ logging.basicConfig(filename='pdf_marker.log',
 					filemode='a',
 					level=logging.INFO)
 console = logging.StreamHandler()
-console.setLevel(logging.DEBUG)
+console.setLevel(logging.INFO)
 console.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
 logging.getLogger('').addHandler(console)
 
@@ -119,12 +119,17 @@ class Candidate:
 		# visual comparison for user
 		score = np.sum(qs, dtype=int)	
 		label_text = ""
+		lines = 0
 		for i in range(len(qs)):
 			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, np.sum(part_qs[i], dtype=int), str(part_qs[i])) + "\n"
+			lines += 1
 		if len(part_qs[-1]) > 0:
 			i = len(qs)
 			label_text += "Q{:<2}:	{:<2}  {:<20}".format(i+1, "- ", str(part_qs[i])) + "\n" # part marks after last tally point
-		
+			lines += 1
+		for i in range(len(ms.qs_max)-lines):
+			label_text += "\n"
+			
 		# formal consistency check, in order helpful to user
 		status = "Incomplete:\n	 "
 		# notify if too many qs
@@ -172,9 +177,7 @@ class Candidate:
 	def GetPagePath(self, i):
 		return os.path.join(self.dir, "%03d"%(i)+".jpg")
 	
-	def GetTouchPagePath(self, i):
-		return os.path.join(self.dir, "%03d"%(i)+"_touch.jpg")
-		
+	
 class PrettyWidget(QtWidgets.QWidget):
 	def __init__(self, parent=None):
 		QtWidgets.QWidget.__init__(self, parent=parent)
@@ -187,8 +190,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.curPage = None # integer, current page of candidate
 		
 		self.curPixmapBG = None # current page without annotations
-		self.curPixMapRatio = 1 # resize ratio of background pixmap 
-		self.curPixMapTouch = None # touch overlay
+		self.curPixMapRatio = 1 # resize ratio of background pixmap to screen space
 		self.marginX = 300 
 				
 		self.lastTabletEventTime = datetime.datetime.now() 
@@ -203,11 +205,219 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.LoadCandidates()
 		self.show()
 		
+	def InitUI(self):
+		self.loadScriptsButton = QtWidgets.QPushButton("Load scripts", self)
+		self.loadScriptsButton.setToolTip("load in the scripts, ignoring any that already have working directories")
+		self.loadScriptsButton.move(5,5)		
+		self.loadScriptsButton.clicked.connect(self.LoadScripts)
+		self.loadScriptsButton.show()
+
+		self.outputScriptsButton = QtWidgets.QPushButton("Output scripts", self)
+		self.outputScriptsButton.setToolTip("write out the annotated scripts, with csv marks if a markscheme was used")
+		self.outputScriptsButton.move(5,5+self.loadScriptsButton.height())		
+		self.outputScriptsButton.clicked.connect(self.OutputScripts)
+		self.outputScriptsButton.show()
+		
+		self.progressLB = QtWidgets.QLabel(self)
+		self.progressLB.setAlignment(Qt.AlignLeft)
+		self.progressLB.setStyleSheet("font: 12pt Consolas")
+		self.progressLB.move(10+self.loadScriptsButton.width(),5)
+		self.progressLB.resize(200, self.loadScriptsButton.height())
+		
+		self.imgLB = QtWidgets.QLabel(self)
+		
+		self.textLB = QtWidgets.QLabel(self)
+		self.textLB.setAlignment(Qt.AlignLeft)
+		#self.textLB.setStyleSheet("font: 15pt Consolas")
+		
+	def LoadMarkScheme(self):			
+		self.markScheme = None
+		file = os.path.join(".", "fullmarks.json")
+		if os.path.exists(file):
+			try:
+				self.markScheme = MarkScheme(file) 
+				logging.info("Loaded mark scheme, %d questions, total %d marks" % (len(self.markScheme.qs_max), np.sum(self.markScheme.qs_max)))
+			except Exception as e:
+				error_msg = "Failed to load mark scheme: %s" % str(e)
+				logging.error(error_msg)
+		else:
+			logging.info("No mark scheme present")
+		
+	@QtCore.pyqtSlot()
+	def LoadScripts(self):
+		logging.info("Loading scripts")
+		x_dim, y_dim = (2480,3508)
+		if not os.path.exists(scripts_dir):
+			logging.error("Scripts not found")
+			return
+		if not os.path.exists(workings_dir):
+			os.mkdir(workings_dir)
+		files = glob.glob(os.path.join(scripts_dir, "*.pdf"))
+		self.progressLB.show()
+		self.progressLB.setText("Processing... (%d/%d)" % (0, len(files)))
+		QtWidgets.QApplication.processEvents()
+		for i in range(len(files)):
+			filename_pdf = files[i]
+			logging.info("Processing '%s' (%d/%d)" % (filename_pdf, i+1, len(files)))
+			try:
+				candidate_name = os.path.split(filename_pdf)[1][:-4]
+				candidate_dir = os.path.join(workings_dir, candidate_name)
+				pages = pdf2image.convert_from_path(filename_pdf, 500)
+				if os.path.exists(candidate_dir):
+					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
+					continue
+				else:
+					os.mkdir(candidate_dir)
+				marks = []
+				for j in range(len(pages)):
+					marks.append([])
+				with open(os.path.join(candidate_dir, "marks.pickle"), 'wb') as f:
+					pickle.dump(marks, f)
+				candidate = Candidate(candidate_dir)
+				for j in range(len(pages)):
+					pages[j].thumbnail((x_dim,y_dim), Image.ANTIALIAS)
+					pages[j].save(candidate.GetPagePath(j))
+			except Exception as e:
+				logging.error("Failed to load script from  '%s': %s" % (filename_pdf, str(e)))
+			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
+			QtWidgets.QApplication.processEvents()
+		logging.info("Done loading")
+		self.progressLB.hide()
+		self.LoadCandidates()
 	
+	def LoadCandidates(self):
+		self.candidateDirs = glob.glob(os.path.join(workings_dir,"*"))
+		if len(self.candidateDirs)==0:
+			logging.info("No candidates found, you probably need to load the scripts in")
+			return
+		self.SetCandidatePage(self.candidateDirs[0], 0)
+	
+	def SetCandidatePage(self, dir, n):
+		# ALL page changes go through here
+		logging.debug("Set candidate page: %s %d" % (dir, n))
+		if not self.curCandidate or dir != self.curCandidate.dir:
+			self.curCandidate = Candidate(dir)
+		if n<0 or n>=len(self.curCandidate.marks):
+			logging.error("Attempt to set invalid candidate page: %s, %d" % (self.curCandidate.name, n))
+			return
+		self.curPage = n
+		
+		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curPage))
+		self.UpdatePixmap()
+	
+	def UpdatePixmap(self):
+		if not self.curPixmapBG:
+			return		
+		logging.debug("Pixmap update")
+		x_window = self.geometry().width()
+		y_window = self.geometry().height()
+		if x_window > 1.5*y_window: # landscape
+			x_ratio = float(x_window*0.5) / float(self.curPixmapBG.width())
+			y_ratio = float(y_window*0.99) / float(self.curPixmapBG.height())
+			ratio = min(x_ratio, y_ratio)
+			self.curPixMapRatio = ratio
+			x_img = self.curPixmapBG.width() * ratio
+			y_img = self.curPixmapBG.height() * ratio	
+			self.imgLB.resize(int(x_img), int(y_img))
+			self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) / 2))
+			self.textLB.resize(int(x_window*0.25), int(y_window*0.6))
+			self.textLB.move(int(x_window*0.1), int(y_window*0.25))
+			fontSize = min(15, int(self.textLB.width()/35))
+			self.textLB.setFont(QtGui.QFont("Consolas", fontSize))
+			self.textLB.setText(self.textLB.text())
+			self.textLB.show() 
+		else: #portrait
+			x_ratio = float(x_window*0.9) / float(self.curPixmapBG.width())
+			y_ratio = float(y_window*0.9) / float(self.curPixmapBG.height())
+			ratio = min(x_ratio, y_ratio)
+			self.curPixMapRatio = ratio
+			x_img = self.curPixmapBG.width() * ratio
+			y_img = self.curPixmapBG.height() * ratio	
+			self.imgLB.resize(int(x_img), int(y_img))
+			self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) * 9/10))
+			self.textLB.hide()			
+		
+		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
+		blankPixmap.fill(QtCore.Qt.transparent)
+		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
+		canvasPainter = QtGui.QPainter(blankPixmap)
+		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
+		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
+		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
+		canvasPainter.end()
+		
+		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
+		self.imgLB.show()	
+
+		if not self.markScheme:
+			return
+		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
+		label_text =  "Global page: %d/%d \n" % (0,0)
+		label_text += "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir), len(self.candidateDirs))
+		label_text += "Page: %d/%d \n\n" % (self.curPage, len(self.curCandidate.marks))	
+		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
+		label_text += part_score_str + "\n\n"
+		label_text += status + "\n"
+		label_text += "Max: %d\n" % self.markScheme.nFullMarks
+		label_text += self.markScheme.fullMarksStr
+		self.textLB.setText(label_text)
+		
+	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
+		pixmap = QtGui.QPixmap(pixmap_bg.width(), pixmap_bg.height())
+		pixmap.fill(QtCore.Qt.transparent)
+		painter = QtGui.QPainter(pixmap)
+		painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+		painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+		painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
+		# mark types: strike, score, tally, justify, circle, leftarrow, rightarrow
+		for mark in marks:
+			if mark.type=="strike" and not suppressStrikes:
+				painter.setOpacity(0.5)
+				w = self.curPixmapBG.width() 
+				h = self.curPixmapBG.height()
+				painter.drawLine(int(w/2/0.9), int(h*0.02), int(w/2*0.9), int(h*0.98))								
+				painter.setOpacity(1)
+			elif mark.type=="circle":
+				painter.drawEllipse(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+			elif mark.type=="justify":
+				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.5)))
+				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+				painter.drawText(rect, Qt.AlignCenter, "justify")			
+			elif mark.type=="score" or mark.type=="tally":
+				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.8)))
+				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+				painter.drawText(rect, Qt.AlignCenter, str(int(mark.score)))
+				if mark.type=="tally":
+					painter.drawRect(rect)
+			elif mark.type=="leftarrow":
+				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
+				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y-mark.h/4), int(mark.x-mark.w/2), mark.y)
+				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y+mark.h/4), int(mark.x-mark.w/2), mark.y)
+			elif mark.type=="rightarrow":
+				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
+				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), mark.y)
+				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), mark.y)
+			elif mark.type=="touch":
+				painter.setPen(QtGui.QPen(Qt.red,  self.tabletPenSize, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+				for i in range(len(mark.posList)-1):
+					x1 = mark.posList[i].x()
+					y1 = mark.posList[i].y()
+					x2 = mark.posList[i+1].x()
+					y2 = mark.posList[i+1].y()
+					painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+				painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
+		# margin		
+		if self.markScheme:
+			painter.setPen(QtGui.QPen(Qt.red,  4, Qt.DashLine))
+			painter.drawLine(self.marginX, 0, self.marginX, int(self.height()/self.curPixMapRatio))
+		painter.end()
+		return pixmap
+
 	def eventFilter(self, obj, event):
 		if event.type() == QtCore.QEvent.MouseButtonPress:	
 			if self.tabletControl or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.15): 
-				return True # some QEvent.TabletPress get duplicated as QEvent.MouseButtonPress >_>
+				return True # some QEvent.TabletPress get duplicatedsd as QEvent.MouseButtonPress >_>
 			self.MousePressEvent(event)
 		elif event.type() == QtCore.QEvent.KeyPress:	
 			self.KeyPressEvent(event)
@@ -265,207 +475,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.UpdatePixmap()
 		
 	def ScaleEventList(self, l):
-		return [QtCore.QPointF(p.x()/self.curPixMapRatio,p.y()/self.curPixMapRatio) for p in l]
-	
-	def InitUI(self):
-		self.loadScriptsButton = QtWidgets.QPushButton("Load scripts", self)
-		self.loadScriptsButton.setToolTip("load in the scripts, ignoring any that already have working directories")
-		self.loadScriptsButton.move(5,5)		
-		self.loadScriptsButton.clicked.connect(self.LoadScripts)
-		self.loadScriptsButton.show()
-
-		self.outputScriptsButton = QtWidgets.QPushButton("Output scripts", self)
-		self.outputScriptsButton.setToolTip("write out the annotated scripts, with csv marks if a markscheme was used")
-		self.outputScriptsButton.move(5,5+self.loadScriptsButton.height())		
-		self.outputScriptsButton.clicked.connect(self.OutputScripts)
-		self.outputScriptsButton.show()
+		return [QtCore.QPointF(p.x()/self.curPixMapRatio,p.y()/self.curPixMapRatio) for p in l]	
 		
-		self.progressLB = QtWidgets.QLabel(self)
-		self.progressLB.setAlignment(Qt.AlignLeft)
-		self.progressLB.setStyleSheet("font: 12pt Consolas")
-		self.progressLB.move(10+self.loadScriptsButton.width(),5)
-		self.progressLB.resize(200, self.loadScriptsButton.height())
-		
-		self.imgLB = QtWidgets.QLabel(self)
-		
-		self.textLB = QtWidgets.QLabel(self)
-		self.textLB.setAlignment(Qt.AlignLeft)
-		self.textLB.setStyleSheet("font: 15pt Consolas")
-		
-	def LoadMarkScheme(self):			
-		self.markScheme = None
-		file = os.path.join(".", "fullmarks.json")
-		if os.path.exists(file):
-			try:
-				self.markScheme = MarkScheme(file) 
-				logging.info("Loaded mark scheme, %d questions, total %d marks" % (len(self.markScheme.qs_max), np.sum(self.markScheme.qs_max)))
-			except Exception as e:
-				error_msg = "Failed to load mark scheme: %s" % str(e)
-				logging.error(error_msg)
-		else:
-			logging.info("No mark scheme present")
-		
-	@QtCore.pyqtSlot()
-	def LoadScripts(self):
-		logging.info("Loading scripts")
-		x_dim, y_dim = (2480,3508)
-		blank_pixmap = QtGui.QPixmap(x_dim, y_dim)
-		blank_pixmap.fill(QtCore.Qt.transparent)
-		if not os.path.exists(scripts_dir):
-			logging.error("Scripts not found")
-			return
-		if not os.path.exists(workings_dir):
-			os.mkdir(workings_dir)
-		files = glob.glob(os.path.join(scripts_dir, "*.pdf"))
-		self.progressLB.show()
-		self.progressLB.setText("Processing... (%d/%d)" % (0, len(files)))
-		QtWidgets.QApplication.processEvents()
-		for i in range(len(files)):
-			filename_pdf = files[i]
-			logging.info("Processing '%s' (%d/%d)" % (filename_pdf, i+1, len(files)))
-			try:
-				candidate_name = os.path.split(filename_pdf)[1][:-4]
-				candidate_dir = os.path.join(workings_dir, candidate_name)
-				pages = pdf2image.convert_from_path(filename_pdf, 500)
-				if os.path.exists(candidate_dir):
-					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
-					continue
-				else:
-					os.mkdir(candidate_dir)
-				marks = []
-				for j in range(len(pages)):
-					marks.append([])
-				with open(os.path.join(candidate_dir, "marks.pickle"), 'wb') as f:
-					pickle.dump(marks, f)
-				candidate = Candidate(candidate_dir)
-				for j in range(len(pages)):
-					pages[j].thumbnail((x_dim,y_dim), Image.ANTIALIAS)
-					pages[j].save(candidate.GetPagePath(j))
-					blank_pixmap.save(candidate.GetTouchPagePath(j))
-			except Exception as e:
-				logging.error("Failed to load script from  '%s': %s" % (filename_pdf, str(e)))
-			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
-			QtWidgets.QApplication.processEvents()
-		logging.info("Done loading")
-		self.progressLB.hide()
-		self.LoadCandidates()
-	
-	def LoadCandidates(self):
-		self.candidateDirs = glob.glob(os.path.join(workings_dir,"*"))
-		if len(self.candidateDirs)==0:
-			logging.info("No candidates found, you probably need to load the scripts in")
-			return
-		self.SetCandidatePage(self.candidateDirs[0], 0)
-	
-	def SetCandidatePage(self, dir, n):
-		# ALL page changes go through here
-		logging.debug("Set candidate page: %s %d" % (dir, n))
-		if not self.curCandidate or dir != self.curCandidate.dir:
-			self.curCandidate = Candidate(dir)
-		if n<0 or n>=len(self.curCandidate.marks):
-			logging.error("Attempt to set invalid candidate page: %s, %d" % (self.curCandidate.name, n))
-			return
-		self.curPage = n
-		
-		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curPage))
-		self.curPixMapTouch = QtGui.QPixmap(self.curCandidate.GetTouchPagePath(self.curPage))
-		self.UpdatePixmap()
-	
-	def UpdatePixmap(self):
-		if not self.curPixmapBG:
-			return		
-		logging.debug("Pixmap update")
-		x_window = self.geometry().width()
-		y_window = self.geometry().height()*0.99 # show user that whole image is visible
-		x_ratio = float(x_window*0.5) / float(self.curPixmapBG.width())
-		y_ratio = float(y_window) / float(self.curPixmapBG.height())
-		ratio = min(x_ratio, y_ratio)
-		self.curPixMapRatio = ratio
-		x_img = self.curPixmapBG.width() * ratio
-		y_img = self.curPixmapBG.height() * ratio	
-		self.imgLB.resize(int(x_img), int(y_img))
-		self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) / 2))
-		self.textLB.resize(int(x_window*0.25), int(y_window*0.6))
-		self.textLB.move(int(x_window*0.1), int(y_window*0.25))	
-		
-		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
-		blankPixmap.fill(QtCore.Qt.transparent)
-		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
-		canvasPainter = QtGui.QPainter(blankPixmap)
-		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
-		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
-		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
-		canvasPainter.end()
-		
-		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
-		self.imgLB.show()	
-
-		if not self.markScheme:
-			return
-		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
-		label_text =  "Global page: %d/%d \n" % (0,0)
-		label_text += "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir), len(self.candidateDirs))
-		label_text += "Page: %d/%d \n\n" % (self.curPage, len(self.curCandidate.marks))	
-		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
-		label_text += part_score_str + "\n\n"
-		label_text += status + "\n"
-		label_text += "Max: %d\n" % self.markScheme.nFullMarks
-		label_text += self.markScheme.fullMarksStr
-		self.textLB.setText(label_text)
-		self.textLB.show()
-		
-	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
-		pixmap = QtGui.QPixmap(pixmap_bg.width(), pixmap_bg.height())
-		pixmap.fill(QtCore.Qt.transparent)
-		painter = QtGui.QPainter(pixmap)
-		painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
-		painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-		painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
-		# mark types: strike, score, tally, justify, circle, leftarrow, rightarrow
-		for mark in marks:
-			if mark.type=="strike" and not suppressStrikes:
-				painter.setOpacity(0.5)
-				w = self.curPixmapBG.width() 
-				h = self.curPixmapBG.height()
-				painter.drawLine(int(w/2/0.9), int(h*0.02), int(w/2*0.9), int(h*0.98))								
-				painter.setOpacity(1)
-			elif mark.type=="circle":
-				painter.drawEllipse(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
-			elif mark.type=="justify":
-				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.5)))
-				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
-				painter.drawText(rect, Qt.AlignCenter, "justify")			
-			elif mark.type=="score" or mark.type=="tally":
-				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.8)))
-				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
-				painter.drawText(rect, Qt.AlignCenter, str(int(mark.score)))
-				if mark.type=="tally":
-					painter.drawRect(rect)
-			elif mark.type=="leftarrow":
-				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y-mark.h/4), int(mark.x-mark.w/2), mark.y)
-				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y+mark.h/4), int(mark.x-mark.w/2), mark.y)
-			elif mark.type=="rightarrow":
-				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), mark.y)
-			elif mark.type=="touch":
-				painter.setPen(QtGui.QPen(Qt.red,  self.tabletPenSize, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-				for i in range(len(mark.posList)-1):
-					x1 = mark.posList[i].x()
-					y1 = mark.posList[i].y()
-					x2 = mark.posList[i+1].x()
-					y2 = mark.posList[i+1].y()
-					painter.drawLine(int(x1), int(y1), int(x2), int(y2))
-				painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
-		# margin		
-		if self.markScheme:
-			painter.setPen(QtGui.QPen(Qt.red,  4, Qt.DashLine))
-			painter.drawLine(self.marginX, 0, self.marginX, int(self.height()/self.curPixMapRatio))
-		painter.end()
-		return pixmap
-
 	def MousePressEvent(self, event):
 		global_x = event.pos().x()
 		global_y = event.pos().y()
@@ -633,8 +644,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			if not good:
 				self.SetCandidatePage(dir, 0)
 				return False
-		return True
-				
+		return True				
 	
 	@QtCore.pyqtSlot()
 	def OutputScripts(self):
