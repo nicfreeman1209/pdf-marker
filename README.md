@@ -68,7 +68,7 @@ In between tally points, the number of times that part-marks are awarded should 
 - Use the S key to add a vertical strike through a page, to indicate that all work on this page was marked.
 - Use the W key to jump to the first candidate on which the checking currently fails. There will be a message explaining the reason.
 
-When there is space on the screen (i.e. if you screen is not in portrait mode), 
+When there is space on the screen (i.e. if your screen is not in portrait mode), 
 text will display the current status of the current candidates marks, against the above criteria.
 If the checks do not pass, a message will explain why not.
 
