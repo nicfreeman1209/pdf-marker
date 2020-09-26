@@ -58,7 +58,7 @@ Within the margin you can:
 3. *all work has been marked.*
 
 *When you click 'Output scripts', each scripts will be checked against the above criteria.
-If they do not all pass, you will be automatically shown the first scripts that does not pass.
+If they do not all pass, you will automatically be taken to the first script that does not pass.
 If they do all pass, the annotated pdfs will be output, alongside various csv files containing candidate marks, part-marks and other useful information.*
 
 Part-marks must be entered into the margin in the correct order. 
