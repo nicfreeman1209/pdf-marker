@@ -39,8 +39,8 @@ All annotations are made in red.
 - Left mouse adds a circle, click again to increase its size.
 - Right mouse adds the word 'justify'.
 - Use a stylus to draw or write onto the page.
-- Right mouse button is used to remove annotations
-  - including those made with a stylus. Each 'connected' use of the stylus is treated as a single annotation.
+- Right mouse is used to remove annotations,
+  - including those made with a stylus! Each 'connected' use of the stylus is treated as a single annotation.
 
 ## Using mark schemes
 
