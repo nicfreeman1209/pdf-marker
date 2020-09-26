@@ -459,7 +459,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			return True
 		last_x = self.tabletEventPosList[-1].x()
 		last_y = self.tabletEventPosList[-1].y()
-		self.tabletPainter.drawLine(x, y, last_x, last_y)
+		self.tabletPainter.drawLine(int(x), int(y), int(last_x), int(last_y))
 		self.update()
 		self.tabletEventPosList.append(QtCore.QPointF(x,y))
 	
