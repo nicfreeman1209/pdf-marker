@@ -353,7 +353,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		if not self.markScheme:
 			return
 		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
-		label_text =  "Global page: %d/%d \n" % (0,0)
+		#label_text =  "Global page: %d/%d \n" % (0,0)
 		label_text += "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir), len(self.candidateDirs))
 		label_text += "Page: %d/%d \n\n" % (self.curPage, len(self.curCandidate.marks))	
 		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
