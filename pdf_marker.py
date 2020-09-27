@@ -14,13 +14,18 @@ import pickle, json, glob
 import logging
 import traceback
 
+#import cProfile
+#from pytictoc import TicToc
+#t = TicToc()
+
+loggingMode = logging.INFO
 logging.basicConfig(filename='pdf_marker.log', 
 					format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
 					datefmt='%m-%d %H:%M:%S',
 					filemode='a',
-					level=logging.INFO)
+					level=loggingMode)
 console = logging.StreamHandler()
-console.setLevel(logging.INFO)
+console.setLevel(loggingMode)
 console.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
 logging.getLogger('').addHandler(console)
 
@@ -194,10 +199,9 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.marginX = 300 
 				
 		self.lastTabletEventTime = datetime.datetime.now() 
-		self.tabletControl = False
-		self.tabletEventPosList = None
-		self.tabletPainter = None
+		self.tabletPainter = None # exists during tablet input
 		self.tabletPenSize = 5
+		self.tabletEventPosList = None
 		
 		self.configFile = os.path.join(".","config.pickle")
 		
@@ -330,6 +334,33 @@ class PrettyWidget(QtWidgets.QWidget):
 		if not self.curPixmapBG:
 			return		
 		logging.debug("Pixmap update")
+		self.SetGeometry()
+		
+		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
+		blankPixmap.fill(QtCore.Qt.transparent)
+		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
+		canvasPainter = QtGui.QPainter(blankPixmap)
+		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
+		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
+		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
+		canvasPainter.end()
+		
+		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
+		self.imgLB.show()	
+		
+		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
+		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
+		if self.markScheme:
+			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
+			label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
+			label_text += part_score_str + "\n\n"
+			label_text += status + "\n\n"
+			label_text += "Max: %d\n" % self.markScheme.nFullMarks
+			label_text += self.markScheme.fullMarksStr
+		self.textLB.setText(label_text)
+		
+	def SetGeometry(self):
 		x_window = self.geometry().width()
 		y_window = self.geometry().height()
 		if x_window > 1.5*y_window: # landscape
@@ -356,21 +387,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			y_img = self.curPixmapBG.height() * ratio	
 			self.imgLB.resize(int(x_img), int(y_img))
 			self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) * 9/10))
-			self.textLB.hide()			
-		
-		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
-		blankPixmap.fill(QtCore.Qt.transparent)
-		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
-		canvasPainter = QtGui.QPainter(blankPixmap)
-		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
-		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
-		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
-		canvasPainter.end()
-		
-		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
-		self.imgLB.show()	
-		
+			self.textLB.hide()				
 		w = self.forwardPageButton.width()
 		h = self.loadScriptsButton.height() 
 		self.backwardPageButton.move(x_window-w*2-5, 5)
@@ -380,17 +397,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.forwardPageButton.resize(w, h*2)
 		self.forwardPageButton.show()
 
-		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
-		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
-		if self.markScheme:
-			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
-			label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
-			label_text += part_score_str + "\n\n"
-			label_text += status + "\n\n"
-			label_text += "Max: %d\n" % self.markScheme.nFullMarks
-			label_text += self.markScheme.fullMarksStr
-		self.textLB.setText(label_text)
-		
+
+			
 	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
 		pixmap = QtGui.QPixmap(pixmap_bg.width(), pixmap_bg.height())
 		pixmap.fill(QtCore.Qt.transparent)
@@ -452,9 +460,15 @@ class PrettyWidget(QtWidgets.QWidget):
 	
 	def eventFilter(self, obj, event):
 		if event.type() == QtCore.QEvent.MouseButtonPress:	
-			if self.tabletControl or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.15): 
+			if self.tabletPainter or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.1): 
+				logging.debug("Suppressed QEvent.MouseButtonPress")
 				return True # some QEvent.TabletPress get duplicatedsd as QEvent.MouseButtonPress >_>
 			self.MousePressEvent(event)
+		elif event.type() == QtCore.QEvent.MouseButtonDblClick:
+			if self.tabletPainter or datetime.datetime.now()-self.lastTabletEventTime < datetime.timedelta(seconds=0.1): 
+				logging.debug("Suppressed QEvent.MouseButtonDblClick")
+				return True 
+			self.MousePressEvent(event)		
 		elif event.type() == QtCore.QEvent.KeyPress:	
 			self.KeyPressEvent(event)
 		elif event.type() == QtCore.QEvent.TabletPress:	
@@ -484,6 +498,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		pen_size = max(1, int(min(self.imgLB.height(), self.imgLB.width())/300)) # magic
 		self.tabletPainter.setPen(QtGui.QPen(Qt.red, self.tabletPenSize*self.curPixMapRatio, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
 		self.tabletEventPosList = [QtCore.QPointF(x,y)] # list for possible future use e.g bezier
+		logging.debug("Tablet painter is on")
 	
 	def TabletMoveEvent(self, event):
 		if not self.tabletPainter or not self.tabletEventPosList:
@@ -503,6 +518,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			return True
 		self.tabletPainter.end()
 		self.tabletPainter = None
+		logging.debug("Tablet painter is off")
 		mark = Mark("touch", -1, -1, -1, -1, None, self.ScaleEventList(self.tabletEventPosList))
 		self.curCandidate.marks[self.curPage].append(mark)
 		logging.debug("Added touch mark, first pos (%f,%f)" % (self.tabletEventPosList[0].x(), self.tabletEventPosList[0].y()))
@@ -580,7 +596,6 @@ class PrettyWidget(QtWidgets.QWidget):
 			else: logging.debug("Added mark: %s" % mark)
 		else:
 			if old_mark: logging.debug("Removed mark: %s" % old_mark)
-				
 		self.curCandidate.TallyMarks()
 		self.curCandidate.SaveMarks()
 		self.UpdatePixmap()		
@@ -612,7 +627,6 @@ class PrettyWidget(QtWidgets.QWidget):
 				return _mark	
 				
 	def KeyPressEvent(self, event):
-		super(PrettyWidget, self).keyPressEvent(event)
 		key = event.key()		
 		shift = (event.modifiers() == QtCore.Qt.ShiftModifier)
 		control = (event.modifiers() == QtCore.Qt.ControlModifier)
@@ -775,8 +789,6 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 def main():
 	app = QtWidgets.QApplication(sys.argv)
-	app.setAttribute(Qt.AA_SynthesizeMouseForUnhandledTouchEvents, False)
-	app.setAttribute(Qt.AA_SynthesizeMouseForUnhandledTabletEvents, False)
 	ex = PrettyWidget()
 	app.exec_()
 
