@@ -687,7 +687,7 @@ class PrettyWidget(QtWidgets.QWidget):
 	@QtCore.pyqtSlot()
 	def OutputScripts(self):
 		# check
-		if self.markScheme and False:
+		if self.markScheme:
 			if not self.SkipToFirstUncheckedCandidate():
 				return
 				
