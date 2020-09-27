@@ -4,7 +4,7 @@ Software for efficient batch marking of pdf files. Designed for handwritten math
 
 Features:
 - View and annotate multiple pdfs -- no need to load or convert files individually.  
-- Keyboard (WASD keys) and mouse (5 button) are sufficient for exam-style marking.
+- Keyboard (WASD keys) and mouse (5 button) are sufficient for bare bones 'exam-style' marking.
 - Stylus can also be used for handwritten annotations.
 - Automatically tallies part-marks 
 - Automatically checks that part-marks are consistent with a mark scheme (specified via a json format) 
