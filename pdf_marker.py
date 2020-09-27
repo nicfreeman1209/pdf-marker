@@ -195,7 +195,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				
 		self.lastTabletEventTime = datetime.datetime.now() 
 		self.tabletControl = False
-		self.tabletEventList = None
+		self.tabletEventPosList = None
 		self.tabletPainter = None
 		self.tabletPenSize = 5
 		
@@ -380,15 +380,16 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.forwardPageButton.resize(w, h*2)
 		self.forwardPageButton.show()
 
+		if not self.markScheme:
+			return
+		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
 		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
 		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
-		if self.markScheme:
-			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
-			label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
-			label_text += part_score_str + "\n\n"
-			label_text += status + "\n\n"
-			label_text += "Max: %d\n" % self.markScheme.nFullMarks
-			label_text += self.markScheme.fullMarksStr
+		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
+		label_text += part_score_str + "\n\n"
+		label_text += status + "\n\n"
+		label_text += "Max: %d\n" % self.markScheme.nFullMarks
+		label_text += self.markScheme.fullMarksStr
 		self.textLB.setText(label_text)
 		
 	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
@@ -474,16 +475,15 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 	def TabletPressEvent(self, event):
 		# touch marks are drawn here in screen space, then converted to underlying image size in TabletReleaseEvent
+		x = event.x() - self.imgLB.x()
+		y = event.y() - self.imgLB.y()
+		if x >= self.imgLB.width() or y >= self.imgLB.height():
+			return True
 		self.tabletPainter = QtGui.QPainter(self.imgLB.pixmap())
 		self.tabletPainter.setRenderHint(QtGui.QPainter.Antialiasing, True)
 		self.tabletPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
 		pen_size = max(1, int(min(self.imgLB.height(), self.imgLB.width())/300)) # magic
 		self.tabletPainter.setPen(QtGui.QPen(Qt.red, self.tabletPenSize*self.curPixMapRatio, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-
-		x = event.x() - self.imgLB.x()
-		y = event.y() - self.imgLB.y()
-		if x >= self.imgLB.width() or y >= self.imgLB.height():
-			return True
 		self.tabletEventPosList = [QtCore.QPointF(x,y)] # list for possible future use e.g bezier
 	
 	def TabletMoveEvent(self, event):
@@ -500,7 +500,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.tabletEventPosList.append(QtCore.QPointF(x,y))
 	
 	def TabletReleaseEvent(self, event):
-		if not self.tabletPainter:
+		if not self.tabletPainter or not self.tabletEventPosList:
 			return True
 		self.tabletPainter.end()
 		self.tabletPainter = None
