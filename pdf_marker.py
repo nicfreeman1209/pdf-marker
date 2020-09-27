@@ -647,11 +647,11 @@ class PrettyWidget(QtWidgets.QWidget):
 			if mark.type=="strike":
 				strike_idx = i
 				break
-		if strike_idx:
+		if strike_idx != None:
 			del marks[strike_idx]
 		else:
-			marks.append(Mark("strike",0,0,0,0))
-		logging.debug("Strike toggled, state=%r" % (self.curFileIdx, strike_idx==None))
+			marks.append(Mark("strike",-1,-1,-1,-1))
+		logging.debug("Strike toggled, state=%r" % (strike_idx==None))
 
 	def IncrementPage(self, step, per_candidate, candidate_first_page=True):
 		if per_candidate:
