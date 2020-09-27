@@ -167,15 +167,16 @@ class Candidate:
 				return False, score, label_text, status	
 		# now check strikes		
 		for i in range(len(self.marks)):
+			found_strike = False
 			for mark in self.marks[i]:
-				found_strike = False
 				if mark.type=="strike":
 					found_strike = True
+					break
 			if not found_strike:
 				status += "Strike missing on page %d" % (i+1)
 				return False, score, label_text, status				
 		# all good
-		for i in range(len(self.marks)):
+		for i in range(len(qs)):
 			assert(qs[i]==np.sum(part_qs[i]))
 		return True, score, label_text, "Complete.\n\n"	
 			
