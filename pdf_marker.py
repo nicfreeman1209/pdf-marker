@@ -706,8 +706,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				shutil.rmtree(out_working_dir)
 			os.mkdir(out_working_dir)
 			for j in range(len(candidate.marks)):
-				bg_file = candidate.GetPagePath(j)
-				bgPixmap = QtGui.QPixmap(bg_file)
+				bgPixmap = QtGui.QPixmap(candidate.GetPagePath(j))
 				marksPixmap = self.CreateMarksPixMap(bgPixmap, candidate.marks[j])
 				canvasPainter = QtGui.QPainter(bgPixmap)
 				canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
