@@ -651,6 +651,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		if not self.curCandidate:
 			return
 		self.curCandidate.marks[self.curPage] = []
+		self.curCandidate.SaveMarks()
 		self.UpdatePixmap()
 		logging.debug("Removed all marks on current page")
 	
