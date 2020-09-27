@@ -380,16 +380,15 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.forwardPageButton.resize(w, h*2)
 		self.forwardPageButton.show()
 
-		if not self.markScheme:
-			return
-		_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
 		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
 		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
-		label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
-		label_text += part_score_str + "\n\n"
-		label_text += status + "\n\n"
-		label_text += "Max: %d\n" % self.markScheme.nFullMarks
-		label_text += self.markScheme.fullMarksStr
+		if self.markScheme:
+			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
+			label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
+			label_text += part_score_str + "\n\n"
+			label_text += status + "\n\n"
+			label_text += "Max: %d\n" % self.markScheme.nFullMarks
+			label_text += self.markScheme.fullMarksStr
 		self.textLB.setText(label_text)
 		
 	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
