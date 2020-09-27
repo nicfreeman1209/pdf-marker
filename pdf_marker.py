@@ -763,8 +763,8 @@ class PrettyWidget(QtWidgets.QWidget):
 			tot_str = str(np.sum(qs, dtype=int))
 			
 			csv_tots += candidate.name + "," + tot_str + ",\n"
-			csv_qs += candidate.name + "," + qs_str + ",\n"
-			csv_part_qs += candidate.name + "," + part_qs_str + ",\n"
+			csv_qs += candidate.name + "," + qs_str + "," + tot_str + ",\n"
+			csv_part_qs += candidate.name + "," + part_qs_str + "," + tot_str + ",\n"
 			csv_exam += candidate.name + "," + qs_str + "," + tot_str + ",y,y,\n"
 			
 		with open(os.path.join("./", "out_totals.csv"), "w") as csv:
