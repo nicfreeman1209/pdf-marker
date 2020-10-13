@@ -5,18 +5,15 @@ from PyQt5 import QtGui, QtCore, QtWidgets
 from PyQt5.QtCore import Qt
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 933120000
-import pdf2image, img2pdf 
+import pdf2image, img2pdf
 import numpy as np
 import itertools
 import os, sys, shutil
 import datetime
 import pickle, json, glob
 import logging
-import traceback
-
+#import traceback
 #import cProfile
-#from pytictoc import TicToc
-#t = TicToc()
 
 loggingMode = logging.INFO
 logging.basicConfig(filename='pdf_marker.log', 
@@ -28,10 +25,6 @@ console = logging.StreamHandler()
 console.setLevel(loggingMode)
 console.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
 logging.getLogger('').addHandler(console)
-
-scripts_dir = os.path.join(".","1_scripts")
-workings_dir = os.path.join(".","2_working")
-outputs_dir = os.path.join(".","3_outputs")
 
 class Mark:
 	def __init__(self, type, x, y, w, h, score=None, posList=None):
@@ -190,10 +183,22 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.showMaximized()		
 		self.setWindowTitle('Pdf Marker')
 		self.installEventFilter(self)
+
 		
-		self.candidateDirs = []
 		self.curCandidate = None # current candidate
-		self.curPage = None # integer, current page of candidate
+		self.curCandidateDir = None # path, of current candidate
+		self.curCandidatePage = None # integer, current page of candidate
+		self.candidateDirs = []
+		
+		# config file
+		self.lastInputDir = None 
+		self.lastOutputDir = None
+		self.lastCandidateDir = None
+		self.lastCandidatePage = None
+		self.configFile = os.path.join(".","config.pickle")
+		self.LoadConfig()
+		
+		self.markScheme = None
 		
 		self.curPixmapBG = None # current page without annotations
 		self.curPixMapRatio = 1 # resize ratio of background pixmap to screen space
@@ -204,25 +209,21 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.tabletPenSize = 5
 		self.tabletEventPosList = None
 		
-		self.configFile = os.path.join(".","config.pickle")
-		
 		logging.info("Initializing")
-		self.LoadMarkScheme()		
 		self.InitUI()
-		self.LoadCandidates()
-		
+		self.InitScripts()		
 		self.show()
 		
 	def InitUI(self):
-		self.loadScriptsButton = QtWidgets.QPushButton("Load scripts", self)
-		self.loadScriptsButton.setToolTip("load in the scripts, ignoring any that already have working directories")
-		self.loadScriptsButton.move(5,5)		
-		self.loadScriptsButton.clicked.connect(self.LoadScripts)
-		self.loadScriptsButton.show()
-
+		self.inputScriptsButton = QtWidgets.QPushButton("Input scripts", self)
+		self.inputScriptsButton.setToolTip("Set the directory containing the unmarked scripts.")
+		self.inputScriptsButton.move(5,5)		
+		self.inputScriptsButton.clicked.connect(self.SetInputDir)
+		self.inputScriptsButton.show()
+		
 		self.outputScriptsButton = QtWidgets.QPushButton("Output scripts", self)
-		self.outputScriptsButton.setToolTip("write out the annotated scripts, with csv marks if a markscheme was used")
-		self.outputScriptsButton.move(5,5+self.loadScriptsButton.height())		
+		self.outputScriptsButton.setToolTip("Write out the annotated scripts, plus csv if a markscheme was used.")
+		self.outputScriptsButton.move(5,5+self.inputScriptsButton.y()+self.inputScriptsButton.height())		
 		self.outputScriptsButton.clicked.connect(self.OutputScripts)
 		self.outputScriptsButton.show()
 		
@@ -236,16 +237,65 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.progressLB = QtWidgets.QLabel(self)
 		self.progressLB.setAlignment(Qt.AlignLeft)
 		self.progressLB.setStyleSheet("font: 12pt Consolas")
-		self.progressLB.move(10+self.loadScriptsButton.width(),5)
-		self.progressLB.resize(200, self.loadScriptsButton.height())
+		self.progressLB.move(10+self.inputScriptsButton.width(),5)
+		self.progressLB.resize(200, self.inputScriptsButton.height())
 		
 		self.imgLB = QtWidgets.QLabel(self)		
 		self.textLB = QtWidgets.QLabel(self)
 		self.textLB.setAlignment(Qt.AlignLeft)
 		
-	def LoadMarkScheme(self):			
-		self.markScheme = None
-		file = os.path.join(".", "fullmarks.json")
+	def SaveConfig(self):
+		config = {
+			"lastInputDir" : self.lastInputDir,
+			"lastCandidateDir" : self.curCandidate.dir,
+			"lastCandidatePage" : self.curCandidatePage,
+			"lastOutputDir" : self.lastOutputDir
+		}
+		with open(self.configFile, "wb") as f:
+			pickle.dump(config, f)			
+		logging.debug("Saved config")
+
+	def LoadConfig(self):
+		if not os.path.exists(self.configFile):
+			logging.info("No config file found, it will be created")
+			return			
+		try:
+			with open(self.configFile, "rb") as f:
+				config = pickle.load(f)			
+				for k,v in config.items():
+					setattr(self, k,v)
+			logging.debug("Loaded config: %s" % str(config))
+		except:
+			logging.warning("Failed to load config file")
+		
+	def InitScripts(self):
+		if not self.lastInputDir:
+			logging.debug("No script dir set, requesting from user")
+			self.SetInputDir()
+			self.InputScripts()
+		else:
+			logging.info("Using scripts dir '%s'" % self.lastInputDir)
+		self.LoadCandidateDirs()	
+	
+	@QtCore.pyqtSlot()
+	def SetInputDir(self):
+		newScriptsDir = QtWidgets.QFileDialog.getExistingDirectory(self, 
+					"Select directory containing raw scripts",
+					self.lastOutputDir,
+					QtWidgets.QFileDialog.ShowDirsOnly)
+		if not newScriptsDir:
+			return
+		if newScriptsDir != self.lastInputDir:
+			self.lastInputDir = newScriptsDir
+			self.curCandidate = None
+			self.curCandidatePage = None
+		logging.info("Scripts dir is '%s'" % self.lastInputDir)
+			
+	def GetInternalDir(self):
+		return os.path.join(self.lastInputDir, "_pdf-marker-internal")
+		
+	def LoadMarkScheme(self):
+		file = os.path.join(self.lastInputDir, "fullmarks.json")
 		if os.path.exists(file):
 			try:
 				self.markScheme = MarkScheme(file) 
@@ -254,18 +304,18 @@ class PrettyWidget(QtWidgets.QWidget):
 				error_msg = "Failed to load mark scheme: %s" % str(e)
 				logging.error(error_msg)
 		else:
-			logging.info("No mark scheme present")
+			logging.info("No mark scheme present")		
 		
 	@QtCore.pyqtSlot()
-	def LoadScripts(self):
-		logging.info("Loading scripts")
-		x_dim, y_dim = (2480,3508)
-		if not os.path.exists(scripts_dir):
+	def InputScripts(self):
+		logging.info("Input scripts")
+		x_dim, y_dim = (2480,3508) # A4 paper at 300 dpi
+		if not os.path.exists(self.lastInputDir):
 			logging.error("Scripts not found")
 			return
-		if not os.path.exists(workings_dir):
-			os.mkdir(workings_dir)
-		files = glob.glob(os.path.join(scripts_dir, "*.pdf"))
+		if not os.path.exists(self.GetInternalDir()):
+			os.mkdir(self.GetInternalDir())
+		files = glob.glob(os.path.join(self.lastInputDir, "*.pdf"))
 		self.progressLB.show()
 		self.progressLB.setText("Processing... (%d/%d)" % (0, len(files)))
 		QtWidgets.QApplication.processEvents()
@@ -274,7 +324,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			logging.info("Processing '%s' (%d/%d)" % (filename_pdf, i+1, len(files)))
 			try:
 				candidate_name = os.path.split(filename_pdf)[1][:-4]
-				candidate_dir = os.path.join(workings_dir, candidate_name)
+				candidate_dir = os.path.join(self.GetInternalDir(), candidate_name)
 				pages = pdf2image.convert_from_path(filename_pdf, 500)
 				if os.path.exists(candidate_dir):
 					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
@@ -291,25 +341,22 @@ class PrettyWidget(QtWidgets.QWidget):
 					pages[j].thumbnail((x_dim,y_dim), Image.ANTIALIAS)
 					pages[j].save(candidate.GetPagePath(j))
 			except Exception as e:
-				logging.error("Failed to load script from  '%s': %s" % (filename_pdf, str(e)))
+				logging.error("Failed to input script from  '%s': %s" % (filename_pdf, str(e)))
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
 			QtWidgets.QApplication.processEvents()
-		logging.info("Done loading")
-		self.progressLB.hide()
-		self.LoadCandidates()
+		logging.info("Done inputting")
+		self.progressLB.hide()		
 	
-	def LoadCandidates(self):
-		self.candidateDirs = glob.glob(os.path.join(workings_dir,"*"))
+	def LoadCandidateDirs(self):
+		self.LoadMarkScheme()
+		self.candidateDirs = glob.glob(os.path.join(self.GetInternalDir(),"*"))
 		if len(self.candidateDirs)==0:
 			logging.info("No candidates found, you probably need to load the scripts in")
 			return
-		
-		if os.path.exists(self.configFile):
-			with open(self.configFile, "rb") as f:
-				config = pickle.load(f)			
-			self.SetCandidatePage(config["candidate"], config["page"])
-			return
-		self.SetCandidatePage(self.candidateDirs[0], 0)
+		if self.lastCandidateDir and self.lastCandidateDir in self.candidateDirs and self.lastCandidatePage != None:
+			self.SetCandidatePage(self.lastCandidateDir, self.lastCandidatePage)
+		else:
+			self.SetCandidatePage(self.candidateDirs[0], 0)
 	
 	def SetCandidatePage(self, dir, n):
 		# ALL page changes go through here
@@ -319,17 +366,16 @@ class PrettyWidget(QtWidgets.QWidget):
 			return
 		if not self.curCandidate or dir != self.curCandidate.dir:
 			self.curCandidate = Candidate(dir)
-		if n<-1 or n>=len(self.curCandidate.marks):
+		if n<-1 or n>len(self.curCandidate.marks):
 			logging.error("Attempt to set invalid candidate page: %s, %d" % (self.curCandidate.name, n))
 			return
-		self.curPage = n if n>=0 else len(self.curCandidate.marks)-1
+		self.curCandidatePage = n if n>=0 else len(self.curCandidate.marks)-1 # use n=-1 for last page of current candidate
+		self.SaveConfig()
+		self.LoadConfig()
 		
-		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curPage))
+		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curCandidatePage))
 		self.UpdatePixmap()
 
-		config = {"candidate":self.curCandidate.dir, "page":self.curPage}
-		with open(self.configFile, "wb") as f:
-			pickle.dump(config, f)			
 	
 	def UpdatePixmap(self):
 		if not self.curPixmapBG:
@@ -339,7 +385,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
 		blankPixmap.fill(QtCore.Qt.transparent)
-		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curPage])	
+		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curCandidatePage])	
 		canvasPainter = QtGui.QPainter(blankPixmap)
 		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
 		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
@@ -351,7 +397,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.imgLB.show()	
 		
 		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
-		label_text += "Page: %d/%d \n\n\n" % (self.curPage+1, len(self.curCandidate.marks))	
+		label_text += "Page: %d/%d \n\n\n" % (self.curCandidatePage+1, len(self.curCandidate.marks))	
 		if self.markScheme:
 			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
 			label_text += "Score: %d/%d = %0.f%%\n" % (score, self.markScheme.nFullMarks, 100*score/self.markScheme.nFullMarks)
@@ -390,7 +436,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			self.imgLB.move(int((x_window - x_img) / 2),int((y_window - y_img) * 9/10))
 			self.textLB.hide()				
 		w = self.forwardPageButton.width()
-		h = self.loadScriptsButton.height() 
+		h = self.inputScriptsButton.height() 
 		self.backwardPageButton.move(x_window-w*2-5, 5)
 		self.backwardPageButton.resize(w, h*2)
 		self.backwardPageButton.show()
@@ -411,8 +457,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		for mark in marks:
 			if mark.type=="strike" and not suppressStrikes:
 				painter.setOpacity(0.5)
-				w = self.curPixmapBG.width() 
-				h = self.curPixmapBG.height()
+				w = pixmap_bg.width() 
+				h = pixmap_bg.height()
 				painter.drawLine(int(w/2/0.9), int(h*0.02), int(w/2*0.9), int(h*0.98))								
 				painter.setOpacity(1)
 			elif mark.type=="circle":
@@ -521,7 +567,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.tabletPainter = None
 		logging.debug("Tablet painter is off")
 		mark = Mark("touch", -1, -1, -1, -1, None, self.ScaleEventList(self.tabletEventPosList))
-		self.curCandidate.marks[self.curPage].append(mark)
+		self.curCandidate.marks[self.curCandidatePage].append(mark)
 		logging.debug("Added touch mark, first pos (%f,%f)" % (self.tabletEventPosList[0].x(), self.tabletEventPosList[0].y()))
 		self.tabletEventPosList = None
 		self.UpdatePixmap()
@@ -534,7 +580,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		global_y = event.pos().y()
 		x = global_x - self.imgLB.x()
 		y = global_y - self.imgLB.y()
-		if x >= self.imgLB.width() or y >= self.imgLB.height():
+		if x >= self.imgLB.width() or y >= self.imgLB.height() or x<0 or y<0:
 			return
 		x /= self.curPixMapRatio
 		y /= self.curPixMapRatio
@@ -543,7 +589,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		margin = self.markScheme and (x <= self.marginX)  
 		if margin:
 			x = self.marginX/2
-		marks = self.curCandidate.marks[self.curPage]
+		marks = self.curCandidate.marks[self.curCandidatePage]
 		mark = self.ExtractMarkAtLoc(x,y, marks)
 		old_mark = mark
 		shift = (event.modifiers() == QtCore.Qt.ShiftModifier)
@@ -650,13 +696,13 @@ class PrettyWidget(QtWidgets.QWidget):
 	def ClearCurrentPage(self):
 		if not self.curCandidate:
 			return
-		self.curCandidate.marks[self.curPage] = []
+		self.curCandidate.marks[self.curCandidatePage] = []
 		self.curCandidate.SaveMarks()
 		self.UpdatePixmap()
 		logging.debug("Removed all marks on current page")
 	
 	def ToggleStrike(self):
-		marks = self.curCandidate.marks[self.curPage]
+		marks = self.curCandidate.marks[self.curCandidatePage]
 		strike_idx = None
 		for i in range(len(marks)):
 			mark = marks[i]
@@ -678,7 +724,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				candidatePage = 0 if candidate_first_page else -1
 				self.SetCandidatePage(dir, candidatePage)
 			return
-		target_page = self.curPage + step
+		target_page = self.curCandidatePage + step
 		if target_page<0:
 			self.IncrementPage(-1, True, False)
 			return
@@ -705,17 +751,27 @@ class PrettyWidget(QtWidgets.QWidget):
 			if not self.SkipToFirstUncheckedCandidate():
 				return
 				
+		# get the output directory		
+		outDir = QtWidgets.QFileDialog.getExistingDirectory(self, 
+					"Select directory to output marked scripts",
+					self.lastOutputDir,
+					QtWidgets.QFileDialog.ShowDirsOnly)
+		if not outDir: 
+			return
+		self.lastOutputDir = outDir
+
+		
 		# write the pdfs
-		if	os.path.exists(outputs_dir):
-			shutil.rmtree(outputs_dir)
-		os.mkdir(outputs_dir)
+		# within internal dirs, write each page to jpg and then convert to pdf		if	os.path.exists(outputs_dir):
+		shutil.rmtree(outDir)
+		os.mkdir(outDir)
 		self.progressLB.show()
 		self.progressLB.setText("Processing... (%d/%d)" % (0, len(self.candidateDirs)))
 		QtWidgets.QApplication.processEvents()
 		for i in range(len(self.candidateDirs)):
-			dir = self.candidateDirs[i]
-			candidate = Candidate(dir)
-			out_working_dir = os.path.join(dir,"output") 
+			candidate_dir = self.candidateDirs[i]
+			candidate = Candidate(candidate_dir)
+			out_working_dir = os.path.join(candidate_dir,"output") 
 			if	os.path.exists(out_working_dir):
 				shutil.rmtree(out_working_dir)
 			os.mkdir(out_working_dir)
@@ -727,16 +783,17 @@ class PrettyWidget(QtWidgets.QWidget):
 				canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
 				canvasPainter.drawPixmap(bgPixmap.rect(), marksPixmap)
 				canvasPainter.end()
-				out_path = os.path.join(out_working_dir, "%03d"%(j)+".jpg")
+				out_path = os.path.join(out_working_dir, "%03d_"%(j)+".jpg")
 				bgPixmap.save(out_path, "jpg")
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
 			QtWidgets.QApplication.processEvents()
 		
 			marked_jpgs = glob.glob(os.path.join(out_working_dir,"*"))
 			pdf = img2pdf.convert(marked_jpgs)
-			with open(os.path.join(outputs_dir, candidate.name+".pdf"), "wb") as f:
+			with open(os.path.join(outDir, candidate.name+".pdf"), "wb") as f:
 				f.write(pdf)
 			logging.info("Wrote marked pdf for '%s' (%d/%d)" % (candidate.name, i+1, len(self.candidateDirs)))
+			shutil.rmtree(out_working_dir)
 		self.progressLB.hide()
 		
 		if not self.markScheme:
@@ -768,17 +825,17 @@ class PrettyWidget(QtWidgets.QWidget):
 			csv_part_qs += candidate.name + "," + part_qs_str + "," + tot_str + ",\n"
 			csv_exam += candidate.name + "," + qs_str + "," + tot_str + ",y,y,\n"
 			
-		with open(os.path.join("./", "out_totals.csv"), "w") as csv:
+		with open(os.path.join(outDir, "out_totals.csv"), "w") as csv:
 			csv.write(csv_tots)
-		with open(os.path.join("./", "out_qs.csv"), "w") as csv:
+		with open(os.path.join(outDir, "out_qs.csv"), "w") as csv:
 			csv.write(csv_qs)
-		with open(os.path.join("./", "out_part_qs.csv"), "w") as csv:
+		with open(os.path.join(outDir, "out_part_qs.csv"), "w") as csv:
 			csv.write(csv_part_qs)
-		with open(os.path.join("./", "out_somas_upload_format.csv"), "w") as csv:
+		with open(os.path.join(outDir, "out_somas_upload_format.csv"), "w") as csv:
 			csv.write(csv_exam)
 		
 		logging.info("Wrote csv files, output complete")
-
+		
 	def resizeEvent(self, event):
 		if hasattr(self,"curCandidate"): # can occur before __init__
 			self.UpdatePixmap()
