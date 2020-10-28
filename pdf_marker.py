@@ -272,10 +272,9 @@ class PrettyWidget(QtWidgets.QWidget):
 		if not self.lastInputDir:
 			logging.debug("No script dir set, requesting from user")
 			self.SetInputDir()
-			self.InputScripts()
 		else:
 			logging.info("Using scripts dir '%s'" % self.lastInputDir)
-		self.LoadCandidateDirs()	
+			self.LoadCandidateDirs()	
 	
 	@QtCore.pyqtSlot()
 	def SetInputDir(self):
@@ -290,6 +289,8 @@ class PrettyWidget(QtWidgets.QWidget):
 			self.curCandidate = None
 			self.curCandidatePage = None
 		logging.info("Scripts dir is '%s'" % self.lastInputDir)
+		self.InputScripts()
+		self.LoadCandidateDirs()	
 			
 	def GetInternalDir(self):
 		return os.path.join(self.lastInputDir, "_pdf-marker-internal")
