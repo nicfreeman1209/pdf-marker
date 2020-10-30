@@ -15,3 +15,6 @@ See [the repository wiki for installation & usage instructions.](https://github.
 Screenshot:
 ![screenshot](https://user-images.githubusercontent.com/14160941/94352010-8c3e9b00-0057-11eb-8acc-48d1dad72b9e.png)
 
+This software aimed at efficient exam style marking, *with few annotations* needed beyond the scores.
+For marking *with significant feedback* I suggest e.g. [https://www.scrble.com/](scrble).
+
