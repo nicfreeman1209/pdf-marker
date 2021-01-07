@@ -5,14 +5,14 @@ from PyQt5 import QtGui, QtCore, QtWidgets
 from PyQt5.QtCore import Qt
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = 933120000
-import pdf2image, img2pdf
+import fitz, fpdf
+import os, sys, shutil, io
 import numpy as np
 import itertools
-import os, sys, shutil
 import datetime
 import pickle, json, glob
 import logging
-#import traceback
+import traceback
 #import cProfile
 
 loggingMode = logging.INFO
@@ -307,6 +307,24 @@ class PrettyWidget(QtWidgets.QWidget):
 		else:
 			logging.info("No mark scheme present")		
 		
+	def ExtractImagesFromPDF(self, filename_pdf):
+		min_width = 128
+		min_height = 16
+		doc = fitz.open(filename_pdf)
+		images = []
+		for i in range(len(doc)):
+			for img in doc.getPageImageList(i):
+				xref = img[0]
+				_pix = fitz.Pixmap(doc, xref)
+				if _pix.width <= min_width and _pix.height <= min_height:
+					continue
+				if _pix.n < 5: # GRAY or RGB
+					pix = _pix
+				else: # CMYK: convert to RGB
+					pix = fitz.Pixmap(fitz.csRGB, _pix)
+				images.append(pix)
+		return images
+		
 	@QtCore.pyqtSlot()
 	def InputScripts(self):
 		logging.info("Input scripts")
@@ -326,7 +344,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			try:
 				candidate_name = os.path.split(filename_pdf)[1][:-4]
 				candidate_dir = os.path.join(self.GetInternalDir(), candidate_name)
-				pages = pdf2image.convert_from_path(filename_pdf, 500)
+				pages = self.ExtractImagesFromPDF(filename_pdf)
 				if os.path.exists(candidate_dir):
 					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
 					continue
@@ -339,10 +357,14 @@ class PrettyWidget(QtWidgets.QWidget):
 					pickle.dump(marks, f)
 				candidate = Candidate(candidate_dir)
 				for j in range(len(pages)):
-					pages[j].thumbnail((x_dim,y_dim), Image.ANTIALIAS)
-					pages[j].save(candidate.GetPagePath(j))
+					imageData = pages[j].getImageData("png")
+					pixmap = Image.open(io.BytesIO(imageData))
+					w, h = x_dim, int(pixmap.height/pixmap.width*x_dim)
+					pixmap = pixmap.resize((w,h))
+					pixmap.save(candidate.GetPagePath(j), dpi=(300,300))
 			except Exception as e:
 				logging.error("Failed to input script from  '%s': %s" % (filename_pdf, str(e)))
+				traceback.print_exc()
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
 			QtWidgets.QApplication.processEvents()
 		logging.info("Done inputting")
@@ -376,25 +398,15 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 		self.curPixmapBG = QtGui.QPixmap(self.curCandidate.GetPagePath(self.curCandidatePage))
 		self.UpdatePixmap()
-
-	
+		
 	def UpdatePixmap(self):
 		if not self.curPixmapBG:
 			return		
 		logging.debug("Pixmap update")
 		self.SetGeometry()
+		pixmap = self.CreatePixmap(self.curPixmapBG, self.curCandidate.marks[self.curCandidatePage])	
 		
-		blankPixmap = QtGui.QPixmap(self.curPixmapBG.width(), self.curPixmapBG.height())
-		blankPixmap.fill(QtCore.Qt.transparent)
-		marksPixmap = self.CreateMarksPixMap(self.curPixmapBG, self.curCandidate.marks[self.curCandidatePage])	
-		canvasPainter = QtGui.QPainter(blankPixmap)
-		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
-		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-		canvasPainter.drawPixmap(blankPixmap.rect(), self.curPixmapBG)
-		canvasPainter.drawPixmap(blankPixmap.rect(), marksPixmap)
-		canvasPainter.end()
-		
-		self.imgLB.setPixmap(blankPixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
+		self.imgLB.setPixmap(pixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
 		self.imgLB.show()	
 		
 		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
@@ -445,9 +457,21 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.forwardPageButton.resize(w, h*2)
 		self.forwardPageButton.show()
 
-
+	def CreatePixmap(self, backgroundPixmap, marks):
+		# overlay marks onto background
+		pixmap = QtGui.QPixmap(backgroundPixmap.width(), backgroundPixmap.height())
+		pixmap.fill(QtCore.Qt.transparent)
+		marksPixmap = self.CreateMarksPixMap(backgroundPixmap, marks)	
+		canvasPainter = QtGui.QPainter(pixmap)
+		canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
+		canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
+		canvasPainter.drawPixmap(pixmap.rect(), backgroundPixmap)
+		canvasPainter.drawPixmap(pixmap.rect(), marksPixmap)
+		canvasPainter.end()
+		return pixmap
 			
-	def CreateMarksPixMap(self, pixmap_bg, marks, suppressStrikes=False):
+	def CreateMarksPixMap(self, pixmap_bg, marks):
+		# create a pixmap with just the marks (no background image)
 		pixmap = QtGui.QPixmap(pixmap_bg.width(), pixmap_bg.height())
 		pixmap.fill(QtCore.Qt.transparent)
 		painter = QtGui.QPainter(pixmap)
@@ -456,7 +480,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		painter.setPen(QtGui.QPen(Qt.red,  4, Qt.SolidLine))
 		# mark types: strike, score, tally, justify, circle, leftarrow, rightarrow
 		for mark in marks:
-			if mark.type=="strike" and not suppressStrikes:
+			if mark.type=="strike":
 				painter.setOpacity(0.5)
 				w = pixmap_bg.width() 
 				h = pixmap_bg.height()
@@ -777,22 +801,23 @@ class PrettyWidget(QtWidgets.QWidget):
 				shutil.rmtree(out_working_dir)
 			os.mkdir(out_working_dir)
 			for j in range(len(candidate.marks)):
-				bgPixmap = QtGui.QPixmap(candidate.GetPagePath(j))
-				marksPixmap = self.CreateMarksPixMap(bgPixmap, candidate.marks[j])
-				canvasPainter = QtGui.QPainter(bgPixmap)
-				canvasPainter.setRenderHint(QtGui.QPainter.Antialiasing)
-				canvasPainter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)	
-				canvasPainter.drawPixmap(bgPixmap.rect(), marksPixmap)
-				canvasPainter.end()
+				pixmap = self.CreatePixmap(QtGui.QPixmap(candidate.GetPagePath(j)), candidate.marks[j])
 				out_path = os.path.join(out_working_dir, "%03d_"%(j)+".jpg")
-				bgPixmap.save(out_path, "jpg")
+				pixmap.save(out_path, "jpg")
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
 			QtWidgets.QApplication.processEvents()
 		
 			marked_jpgs = glob.glob(os.path.join(out_working_dir,"*"))
-			pdf = img2pdf.convert(marked_jpgs)
-			with open(os.path.join(outDir, candidate.name+".pdf"), "wb") as f:
-				f.write(pdf)
+			pdf = fpdf.FPDF(unit="mm", format=[210,297]) # A4
+			for image in marked_jpgs:
+				pdf.add_page()
+				pdf.set_margins(10,10,10)
+				pdf.image(image,10,10,190,0)
+			pdf.output(os.path.join(outDir, candidate.name+".pdf"), "F")
+			
+			#pdf = img2pdf.convert(marked_jpgs)
+			#with open(, "wb") as f:
+			#	f.write(pdf)
 			logging.info("Wrote marked pdf for '%s' (%d/%d)" % (candidate.name, i+1, len(self.candidateDirs)))
 			shutil.rmtree(out_working_dir)
 		self.progressLB.hide()
