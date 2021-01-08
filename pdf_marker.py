@@ -266,8 +266,7 @@ class PrettyWidget(QtWidgets.QWidget):
 					setattr(self, k,v)
 			logging.debug("Loaded config: %s" % str(config))
 		except:
-			logging.warning("Failed to load config file")
-			traceback.print_exc()
+			logging.exception("Failed to load config file")
 			sys.exit()
 		
 	def InitScripts(self):
@@ -305,8 +304,7 @@ class PrettyWidget(QtWidgets.QWidget):
 				logging.info("Loaded mark scheme, %d questions, total %d marks" % (len(self.markScheme.qs_max), np.sum(self.markScheme.qs_max)))
 			except Exception as e:
 				error_msg = "Failed to load mark scheme: %s" % str(e)
-				logging.error(error_msg)
-				traceback.print_exc()
+				logging.exception(error_msg)
 				sys.exit()
 		else:
 			logging.info("No mark scheme present")		
@@ -367,8 +365,7 @@ class PrettyWidget(QtWidgets.QWidget):
 					pixmap = pixmap.resize((w,h))
 					pixmap.save(candidate.GetPagePath(j), dpi=(300,300))
 			except Exception as e:
-				logging.error("Failed to input script from  '%s': %s" % (filename_pdf, str(e)))
-				traceback.print_exc()
+				logging.exception("Failed to input script from  '%s': %s" % (filename_pdf, str(e)))
 				sys.exit()
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
 			QtWidgets.QApplication.processEvents()
