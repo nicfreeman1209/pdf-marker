@@ -267,6 +267,8 @@ class PrettyWidget(QtWidgets.QWidget):
 			logging.debug("Loaded config: %s" % str(config))
 		except:
 			logging.warning("Failed to load config file")
+			traceback.print_exc()
+			sys.exit()
 		
 	def InitScripts(self):
 		if not self.lastInputDir:
@@ -304,6 +306,8 @@ class PrettyWidget(QtWidgets.QWidget):
 			except Exception as e:
 				error_msg = "Failed to load mark scheme: %s" % str(e)
 				logging.error(error_msg)
+				traceback.print_exc()
+				sys.exit()
 		else:
 			logging.info("No mark scheme present")		
 		
@@ -365,6 +369,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			except Exception as e:
 				logging.error("Failed to input script from  '%s': %s" % (filename_pdf, str(e)))
 				traceback.print_exc()
+				sys.exit()
 			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(files)))
 			QtWidgets.QApplication.processEvents()
 		logging.info("Done inputting")
@@ -787,7 +792,7 @@ class PrettyWidget(QtWidgets.QWidget):
 
 		
 		# write the pdfs
-		# within internal dirs, write each page to jpg and then convert to pdf		if	os.path.exists(outputs_dir):
+		# within internal dirs, write each page to jpg and then convert to pdf		
 		shutil.rmtree(outDir)
 		os.mkdir(outDir)
 		self.progressLB.show()
