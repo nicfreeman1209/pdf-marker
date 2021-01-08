@@ -26,6 +26,14 @@ console.setLevel(loggingMode)
 console.setFormatter(logging.Formatter('%(levelname)-8s %(message)s'))
 logging.getLogger('').addHandler(console)
 
+		
+def ExceptionHook(excType, excValue, traceback, logging=logging):
+    logging.error("Uncaught exception",
+                 exc_info=(excType, excValue, traceback))
+
+sys.excepthook = ExceptionHook
+
+
 class Mark:
 	def __init__(self, type, x, y, w, h, score=None, posList=None):
 		self.type = type
@@ -869,7 +877,6 @@ class PrettyWidget(QtWidgets.QWidget):
 		if self.curCandidate:
 			self.curCandidate.SaveMarks()
 		logging.info("Shutdown")
-
 		
 def main():
 	app = QtWidgets.QApplication(sys.argv)
