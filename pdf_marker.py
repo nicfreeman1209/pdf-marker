@@ -133,7 +133,7 @@ class Candidate:
 		# notify if too many qs
 		if len(qs) > len(ms.qs_max):
 			status += "Too many questions (%d vs %d)" % (len(qs), len(ms.qs_max))
-			return checked, score, label_text, status		
+			return False, score, label_text, status		
 		if len(part_qs) > len(ms.qs_max) and len(part_qs[-1])>0:
 			status += "Part marks after final tally point"
 			return False, score, label_text, status	
