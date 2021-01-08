@@ -815,9 +815,6 @@ class PrettyWidget(QtWidgets.QWidget):
 				pdf.image(image,10,10,190,0)
 			pdf.output(os.path.join(outDir, candidate.name+".pdf"), "F")
 			
-			#pdf = img2pdf.convert(marked_jpgs)
-			#with open(, "wb") as f:
-			#	f.write(pdf)
 			logging.info("Wrote marked pdf for '%s' (%d/%d)" % (candidate.name, i+1, len(self.candidateDirs)))
 			shutil.rmtree(out_working_dir)
 		self.progressLB.hide()
