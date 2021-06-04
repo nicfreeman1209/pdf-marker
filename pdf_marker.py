@@ -419,7 +419,8 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.imgLB.setPixmap(pixmap.scaled(self.imgLB.size(), QtCore.Qt.IgnoreAspectRatio, transformMode=QtCore.Qt.SmoothTransformation))	
 		self.imgLB.show()	
 		
-		label_text = "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
+		label_text = "Filename: %s \n" % (self.curCandidate.name)
+		label_text += "Candidate: %d/%d \n" % (self.candidateDirs.index(self.curCandidate.dir)+1, len(self.candidateDirs))
 		label_text += "Page: %d/%d \n\n\n" % (self.curCandidatePage+1, len(self.curCandidate.marks))	
 		if self.markScheme:
 			_, score, part_score_str, status = self.curCandidate.CheckMarks(self.markScheme)
@@ -843,7 +844,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		csv_tots	= "Candidate,Total,\n"
 		csv_qs		= "Candidate, " + questions_str + "Total,\n"
 		csv_part_qs = "Candidate," + part_questions_str + "Total,\n"
-		csv_exam	= "Candidate," + questions_str + "Total,All Marked,Total Checked,\n"
+		csv_exam	= ""
 		
 		for i in range(len(self.candidateDirs)):
 			dir = self.candidateDirs[i]
@@ -856,7 +857,7 @@ class PrettyWidget(QtWidgets.QWidget):
 			csv_tots += candidate.name + "," + tot_str + ",\n"
 			csv_qs += candidate.name + "," + qs_str + "," + tot_str + ",\n"
 			csv_part_qs += candidate.name + "," + part_qs_str + "," + tot_str + ",\n"
-			csv_exam += candidate.name + "," + qs_str + "," + tot_str + ",y,y,\n"
+			csv_exam += candidate.name + "," + tot_str + "\n"
 			
 		with open(os.path.join(outDir, "out_totals.csv"), "w") as csv:
 			csv.write(csv_tots)
