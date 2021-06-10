@@ -321,7 +321,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		min_width = 128
 		min_height = 16
 		doc = fitz.open(filename_pdf)
-		images = []
+		imageDatas = []
 		for i in range(len(doc)):
 			for img in doc.getPageImageList(i):
 				xref = img[0]
@@ -332,7 +332,17 @@ class PrettyWidget(QtWidgets.QWidget):
 					pix = _pix
 				else: # CMYK: convert to RGB
 					pix = fitz.Pixmap(fitz.csRGB, _pix)
-				images.append(pix)
+				imageData = pix.getImageData("png")
+				imageDatas.append(imageData)
+		# dedup in case clipped copies are used on successive pdf pages (e.g. to avoid downscaling)
+		dedupImageDatas = []
+		for imageData in imageDatas:
+			if len(dedupImageDatas)==0 or imageData!=dedupImageDatas[-1]:
+				dedupImageDatas.append(imageData)
+		images = []
+		for imageData in dedupImageDatas:
+			image = Image.open(io.BytesIO(imageData))					
+			images.append(image)
 		return images
 		
 	@QtCore.pyqtSlot()
@@ -354,21 +364,20 @@ class PrettyWidget(QtWidgets.QWidget):
 			try:
 				candidate_name = os.path.split(filename_pdf)[1][:-4]
 				candidate_dir = os.path.join(self.GetInternalDir(), candidate_name)
-				pages = self.ExtractImagesFromPDF(filename_pdf)
+				images = self.ExtractImagesFromPDF(filename_pdf)
 				if os.path.exists(candidate_dir):
 					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
 					continue
 				else:
 					os.mkdir(candidate_dir)
 				marks = []
-				for j in range(len(pages)):
+				for j in range(len(images)):
 					marks.append([])
 				with open(os.path.join(candidate_dir, "marks.pickle"), 'wb') as f:
 					pickle.dump(marks, f)
 				candidate = Candidate(candidate_dir)
-				for j in range(len(pages)):
-					imageData = pages[j].getImageData("png")
-					pixmap = Image.open(io.BytesIO(imageData))
+				for j in range(len(images)):
+					pixmap = images[j] 
 					w, h = x_dim, int(pixmap.height/pixmap.width*x_dim)
 					pixmap = pixmap.resize((w,h))
 					pixmap.save(candidate.GetPagePath(j), dpi=(300,300))
