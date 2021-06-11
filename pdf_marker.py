@@ -619,7 +619,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		
 	def ScaleEventList(self, l):
 		return [QtCore.QPointF(p.x()/self.curPixMapRatio,p.y()/self.curPixMapRatio) for p in l]	
-		
+	
 	def MousePressEvent(self, event):
 		global_x = event.pos().x()
 		global_y = event.pos().y()
@@ -652,8 +652,10 @@ class PrettyWidget(QtWidgets.QWidget):
 			else:
 				if event.button()==1: # left mouse
 					mark = Mark("circle", x, y, scale/3, scale/3)
-				if event.button()==2: # right mouse
+				elif event.button()==2: # right mouse
 					mark = Mark("justify", x, y, scale/2, scale/3.5)
+				elif event.button()==4: # mid mouse
+					self.ToggleStrike()
 				elif event.button()==16: # forward mouse
 					mark = Mark("rightarrow", x, y, scale/2, scale/3)
 				elif event.button()==8: # backwards mouse
@@ -717,7 +719,11 @@ class PrettyWidget(QtWidgets.QWidget):
 				_mark = mark
 				del marks[i]
 				return _mark	
-				
+	
+	def wheelEvent(self, event):
+		y = event.angleDelta().y()
+		self.IncrementPage(-1 if y>0 else 1, False)
+		
 	def KeyPressEvent(self, event):
 		key = event.key()		
 		shift = (event.modifiers() == QtCore.Qt.ShiftModifier)
