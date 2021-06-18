@@ -364,13 +364,13 @@ class PrettyWidget(QtWidgets.QWidget):
 			try:
 				candidate_name = os.path.split(filename_pdf)[1][:-4]
 				candidate_dir = os.path.join(self.GetInternalDir(), candidate_name)
-				images = self.ExtractImagesFromPDF(filename_pdf)
 				if os.path.exists(candidate_dir):
 					logging.info("Candidate directory for '%s' already exists, skipping." % filename_pdf)
 					continue
 				else:
 					os.mkdir(candidate_dir)
 				marks = []
+				images = self.ExtractImagesFromPDF(filename_pdf)
 				for j in range(len(images)):
 					marks.append([])
 				with open(os.path.join(candidate_dir, "marks.pickle"), 'wb') as f:
@@ -507,25 +507,25 @@ class PrettyWidget(QtWidgets.QWidget):
 				painter.drawLine(int(w/2/0.9), int(h*0.02), int(w/2*0.9), int(h*0.98))								
 				painter.setOpacity(1)
 			elif mark.type=="circle":
-				painter.drawEllipse(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+				painter.drawEllipse(int(mark.x-mark.w/2), int(mark.y-mark.h/2), int(mark.w), int(mark.h))
 			elif mark.type=="justify":
 				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.5)))
-				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), int(mark.w), int(mark.h))
 				painter.drawText(rect, Qt.AlignCenter, "justify")			
 			elif mark.type=="score" or mark.type=="tally":
 				painter.setFont(QtGui.QFont("sanserif", int(mark.h*0.8)))
-				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), mark.w, mark.h)
+				rect = QtCore.QRect(int(mark.x-mark.w/2), int(mark.y-mark.h/2), int(mark.w), int(mark.h))
 				painter.drawText(rect, Qt.AlignCenter, str(int(mark.score)))
 				if mark.type=="tally":
 					painter.drawRect(rect)
 			elif mark.type=="leftarrow":
-				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y-mark.h/4), int(mark.x-mark.w/2), mark.y)
-				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y+mark.h/4), int(mark.x-mark.w/2), mark.y)
+				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), int(mark.y))
+				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y-mark.h/4), int(mark.x-mark.w/2), int(mark.y))
+				painter.drawLine(int(mark.x-mark.w/2+mark.h/4), int(mark.y+mark.h/4), int(mark.x-mark.w/2), int(mark.y))
 			elif mark.type=="rightarrow":
-				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), mark.y)
-				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), mark.y)
+				painter.drawLine(int(mark.x-mark.w/2), mark.y, int(mark.x+mark.w/2), int(mark.y))
+				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y-mark.h/4), int(mark.x+mark.w/2), int(mark.y))
+				painter.drawLine(int(mark.x+mark.w/2-mark.h/4), int(mark.y+mark.h/4), int(mark.x+mark.w/2), int(mark.y))
 			elif mark.type=="touch":
 				painter.setPen(QtGui.QPen(Qt.red,  self.tabletPenSize, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
 				for i in range(len(mark.posList)-1):
@@ -645,21 +645,19 @@ class PrettyWidget(QtWidgets.QWidget):
 				if event.button()==1: # left mouse
 					count = 5 if shift else 1
 					mark = Mark("score", x, y, scale/3*1.25, scale/3, count)
-				elif event.button()==2: # left mouse
+				elif event.button()==2: # right mouse
 					mark = Mark("score", x, y, scale/3*1.25, scale/3, 0)
-				elif event.button()==4: # mid mouse
+				elif event.button()==8: # backwards mouse
 					mark = Mark("tally", x, y, scale/3*1.25, scale/3, -1)
 			else:
 				if event.button()==1: # left mouse
 					mark = Mark("circle", x, y, scale/3, scale/3)
 				elif event.button()==2: # right mouse
-					mark = Mark("justify", x, y, scale/2, scale/3.5)
-				elif event.button()==4: # mid mouse
 					self.ToggleStrike()
+				elif event.button()==8: # backwards mouse
+					mark = Mark("justify", x, y, scale/2, scale/3.5)
 				elif event.button()==16: # forward mouse
 					mark = Mark("rightarrow", x, y, scale/2, scale/3)
-				elif event.button()==8: # backwards mouse
-					mark = Mark("leftarrow", x, y, scale/2, scale/3)
 		else:
 			# mark exists here already
 			if margin and mark.type=="score":			
@@ -681,6 +679,10 @@ class PrettyWidget(QtWidgets.QWidget):
 						mark.w /= incr_scale
 						if mark.h<=150 or mark.w<=150:
 							mark = None
+				elif mark.type=="leftarrow" and event.button()==16:
+					mark = Mark("rightarrow", x, y, scale/2, scale/3)
+				elif mark.type=="rightarrow" and event.button()==16:
+					mark = Mark("leftarrow", x, y, scale/2, scale/3)
 				else:
 					mark = None
 		if mark:
