@@ -836,11 +836,18 @@ class PrettyWidget(QtWidgets.QWidget):
 			QtWidgets.QApplication.processEvents()
 		
 			marked_jpgs = glob.glob(os.path.join(out_working_dir,"*"))
-			pdf = fpdf.FPDF(unit="mm", format=[210,297]) # A4
+			pdf = fpdf.FPDF(unit="mm", format=[210,297]) # A4 in mm
 			for image in marked_jpgs:
 				pdf.add_page()
-				pdf.set_margins(10,10,10)
-				pdf.image(image,10,10,190,0)
+				im = Image.open(image)
+				w = im.width/(2480/190) # rescale from A4 at 300 dpi
+				h = im.height/(3509/297)
+				scale = 1
+				if w > 190 or h > 277: 
+					scale = min(scale, 190/w)
+					scale = min(scale, 277/h)
+				pdf.set_margins(10,10,10)					
+				pdf.image(image, 10, 10, int(w*scale), int(h*scale))
 			pdf.output(os.path.join(outDir, candidate.name+".pdf"), "F")
 			
 			logging.info("Wrote marked pdf for '%s' (%d/%d)" % (candidate.name, i+1, len(self.candidateDirs)))
