@@ -839,9 +839,9 @@ class PrettyWidget(QtWidgets.QWidget):
 			pdf = fpdf.FPDF(unit="mm", format=[210,297]) # A4 in mm
 			for image in marked_jpgs:
 				pdf.add_page()
-				im = Image.open(image)
-				w = im.width/(2480/190) # rescale from A4 at 300 dpi
-				h = im.height/(3509/297)
+				with Image.open(image) as im:
+					w = im.width/(2480/190) # rescale from A4 at 300 dpi
+					h = im.height/(3509/297)
 				scale = 1
 				if w > 190 or h > 277: 
 					scale = min(scale, 190/w)
