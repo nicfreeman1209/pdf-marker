@@ -191,7 +191,6 @@ class PrettyWidget(QtWidgets.QWidget):
 		self.showMaximized()		
 		self.setWindowTitle('Pdf Marker')
 		self.installEventFilter(self)
-
 		
 		self.curCandidate = None # current candidate
 		self.curCandidateDir = None # path, of current candidate
@@ -812,6 +811,7 @@ class PrettyWidget(QtWidgets.QWidget):
 		if not outDir: 
 			return
 		self.lastOutputDir = outDir
+		self.SaveConfig()
 
 		
 		# write the pdfs
@@ -819,9 +819,9 @@ class PrettyWidget(QtWidgets.QWidget):
 		shutil.rmtree(outDir)
 		os.mkdir(outDir)
 		self.progressLB.show()
-		self.progressLB.setText("Processing... (%d/%d)" % (0, len(self.candidateDirs)))
-		QtWidgets.QApplication.processEvents()
 		for i in range(len(self.candidateDirs)):
+			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
+			QtWidgets.QApplication.processEvents()
 			candidate_dir = self.candidateDirs[i]
 			candidate = Candidate(candidate_dir)
 			out_working_dir = os.path.join(candidate_dir,"output") 
@@ -832,21 +832,18 @@ class PrettyWidget(QtWidgets.QWidget):
 				pixmap = self.CreatePixmap(QtGui.QPixmap(candidate.GetPagePath(j)), candidate.marks[j])
 				out_path = os.path.join(out_working_dir, "%03d_"%(j)+".jpg")
 				pixmap.save(out_path, "jpg")
-			self.progressLB.setText("Processing... (%d/%d)" % (i+1, len(self.candidateDirs)))
-			QtWidgets.QApplication.processEvents()
 		
 			marked_jpgs = glob.glob(os.path.join(out_working_dir,"*"))
 			pdf = fpdf.FPDF(unit="mm", format=[210,297]) # A4 in mm
 			for image in marked_jpgs:
 				pdf.add_page()
+				pdf.set_margins(10,10,10)					
 				with Image.open(image) as im:
 					w = im.width/(2480/190) # rescale from A4 at 300 dpi
 					h = im.height/(3509/297)
 				scale = 1
-				if w > 190 or h > 277: 
-					scale = min(scale, 190/w)
-					scale = min(scale, 277/h)
-				pdf.set_margins(10,10,10)					
+				scale = min(scale, 170/w)
+				scale = min(scale, 277/h)
 				pdf.image(image, 10, 10, int(w*scale), int(h*scale))
 			pdf.output(os.path.join(outDir, candidate.name+".pdf"), "F")
 			
